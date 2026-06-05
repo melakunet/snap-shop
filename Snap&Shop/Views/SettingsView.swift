@@ -65,8 +65,11 @@ struct SettingsView: View {
                 Toggle(isOn: Binding(
                     get: { selectedRetailers.contains(retailer.name) },
                     set: { on in
-                        if on { selectedRetailers.insert(retailer.name) }
-                        else { selectedRetailers.remove(retailer.name) }
+                        if on {
+                            selectedRetailers.insert(retailer.name)
+                        } else {
+                            selectedRetailers.remove(retailer.name)
+                        }
                     }
                 )) {
                     HStack(spacing: Spacing.md) {

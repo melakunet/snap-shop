@@ -12,9 +12,9 @@ struct OnboardingView: View {
     @State private var currentPage = 0
 
     private let slides: [OnboardingSlide] = [
-        OnboardingSlide(title: "Snap It",        body: "Point your camera at any product — no barcode needed.",     icon: "camera.fill"),
+        OnboardingSlide(title: "Snap It", body: "Point your camera at any product — no barcode needed.", icon: "camera.fill"),
         OnboardingSlide(title: "Compare Prices", body: "See live prices from Amazon, Walmart, Best Buy, and more.", icon: "tag.fill"),
-        OnboardingSlide(title: "Save Money",     body: "Track price drops on favourites and never overpay again.",  icon: "star.fill")
+        OnboardingSlide(title: "Save Money", body: "Track price drops on favourites and never overpay again.", icon: "star.fill")
     ]
 
     var body: some View {
