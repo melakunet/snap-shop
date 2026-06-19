@@ -10,6 +10,7 @@ export const Env = z.object({
   UPSTASH_REDIS_REST_TOKEN: z.string(),
   SENTRY_DSN: z.string(),
   PLAUSIBLE_DOMAIN: z.string(),
+  DEV_AUTH_BYPASS: z.string().optional(),
 })
 
 export type Env = z.infer<typeof Env>
