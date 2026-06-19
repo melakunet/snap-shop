@@ -34,15 +34,37 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+        run: |
+          if [ -d /Applications/Xcode_16.4.app ]; then
+            sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          fi
+          xcodebuild -version
 
       - name: Build & Test
         run: |
           set -o pipefail
+          # Find the first available Apple Vision Pro simulator by UDID.
+          # Using id= avoids passing 'variant=Designed for [iPad,iPhone]' on the
+          # command line, where xcodebuild would split on the comma inside the brackets.
+          UDID=$(xcrun simctl list devices available --json | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          for rt, devs in data.get('devices', {}).items():
+              for d in devs:
+                  if 'Apple Vision Pro' in d.get('name', '') and d.get('isAvailable', False):
+                      print(d['udid'])
+                      sys.exit(0)
+          " 2>/dev/null || echo "")
+          if [ -z "$UDID" ]; then
+            echo "No Apple Vision Pro simulator found; available devices:"
+            xcrun simctl list devices available | grep -v "^==" || true
+            exit 1
+          fi
+          echo "Destination simulator: $UDID"
           xcodebuild test \
             -project 'Snap&Shop.xcodeproj' \
             -scheme 'Snap&Shop' \
-            -destination 'platform=visionOS Simulator,variant=Designed for [iPad,iPhone],OS=latest,name=Apple Vision Pro' \
+            -destination "platform=visionOS Simulator,id=$UDID" \
             -enableCodeCoverage YES \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO
