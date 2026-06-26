@@ -29,9 +29,22 @@
 		B5A048372FC9D5C200C61847 /* Snap&ShopUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Snap&ShopUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		B57D87F22FEECB360007BBC8 /* Exceptions for "Snap&Shop" folder in "Snap&Shop" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Snap-Shop-Info.plist",
+			);
+			target = B5A0481D2FC9D5C000C61847 /* Snap&Shop */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		B5A048202FC9D5C000C61847 /* Snap&Shop */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B57D87F22FEECB360007BBC8 /* Exceptions for "Snap&Shop" folder in "Snap&Shop" target */,
+			);
 			path = "Snap&Shop";
 			sourceTree = "<group>";
 		};
@@ -400,6 +413,9 @@
 				DEVELOPMENT_TEAM = LGHH7X2AJP;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Snap-Shop-Info.plist";
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Snap & Shop uses the camera to identify products you point it at, so you can compare prices and reviews instantly.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -432,6 +448,9 @@
 				DEVELOPMENT_TEAM = LGHH7X2AJP;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Snap-Shop-Info.plist";
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Snap & Shop uses the camera to identify products you point it at, so you can compare prices and reviews instantly.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

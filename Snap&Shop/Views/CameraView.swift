@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 enum ScanMode {
     case precision
@@ -6,6 +7,7 @@ enum ScanMode {
 }
 
 struct CameraView: View {
+    @StateObject private var session = CameraSession()
     @State private var scanMode: ScanMode = .precision
     @State private var isScanning = false
     @State private var flashOn = false
@@ -39,6 +41,8 @@ struct CameraView: View {
                     .padding(.bottom, Spacing.xxxl)
             }
         }
+        .onAppear { session.start() }
+        .onDisappear { session.stop() }
         .onChange(of: scanMode) { _, _ in
             withAnimation(.spring(duration: 0.2)) { isScanning = false }
         }
@@ -116,9 +120,38 @@ struct CameraView: View {
 
     private var viewfinderContainer: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: Radius.lg)
-                .fill(Color.white.opacity(0.04))
-                .frame(width: 280, height: 280)
+            if session.permissionGranted {
+                CameraPreviewView(session: session.session)
+                    .frame(width: 280, height: 280)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.lg))
+            } else if session.permissionDenied {
+                RoundedRectangle(cornerRadius: Radius.lg)
+                    .fill(Color.white.opacity(0.04))
+                    .frame(width: 280, height: 280)
+                    .overlay(
+                        VStack(spacing: Spacing.md) {
+                            Image(systemName: "camera.slash")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.white.opacity(0.5))
+                            Text("Camera access required.")
+                                .font(Typography.callout)
+                                .foregroundStyle(.white.opacity(0.5))
+                                .multilineTextAlignment(.center)
+                            Button("Open Settings") {
+                                if let url = URL(string: UIApplication.openSettingsURLString) {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                            .font(Typography.callout.weight(.semibold))
+                            .foregroundStyle(Color.Brand.accent)
+                        }
+                        .padding(Spacing.lg)
+                    )
+            } else {
+                RoundedRectangle(cornerRadius: Radius.lg)
+                    .fill(Color.white.opacity(0.04))
+                    .frame(width: 280, height: 280)
+            }
 
             if scanMode == .precision {
                 precisionOverlay
@@ -206,7 +239,11 @@ struct CameraView: View {
             }
 
             Button {
-                withAnimation(.spring(duration: 0.2)) { isScanning.toggle() }
+                if scanMode == .precision {
+                    session.capturePhoto(flashOn: flashOn)
+                } else {
+                    withAnimation(.spring(duration: 0.2)) { isScanning.toggle() }
+                }
             } label: {
                 ZStack {
                     Circle()
@@ -224,8 +261,10 @@ struct CameraView: View {
                     }
                 }
             }
-            .scaleEffect(isScanning ? 0.88 : 1.0)
+            .disabled(scanMode == .precision && session.isCapturing)
+            .scaleEffect(isScanning || session.isCapturing ? 0.88 : 1.0)
             .animation(.spring(duration: 0.2), value: isScanning)
+            .animation(.spring(duration: 0.2), value: session.isCapturing)
         }
     }
 }
