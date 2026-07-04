@@ -11,6 +11,11 @@ export const Env = z.object({
   SENTRY_DSN: z.string(),
   PLAUSIBLE_DOMAIN: z.string(),
   DEV_AUTH_BYPASS: z.string().optional(),
+  // Part B — free-tier optional keys
+  UPCITEMDB_KEY: z.string().optional(),
+  GROQ_API_KEY: z.string().optional(),
+  BESTBUY_API_KEY: z.string().optional(),
+  EBAY_APP_ID: z.string().optional(),
 })
 export type Env = z.infer<typeof Env>
 

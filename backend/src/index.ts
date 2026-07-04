@@ -10,6 +10,9 @@ import precisionRoute from './routes/identify-precision'
 import deepRoute from './routes/identify-deep'
 import shopRoute from './routes/shop'
 
+// TODO (Phase 4): expose /identify and /shop as MCP tools for agentic-commerce
+// interop using the Model Context Protocol server SDK.
+
 const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 // Telemetry — runs on every request, sets requestId + startMs in context
