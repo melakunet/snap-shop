@@ -24,6 +24,7 @@ interface SerpResult {
   delivery?: string
   source?: string
   link?: string
+  product_link?: string
   thumbnail?: string
 }
 
@@ -72,7 +73,7 @@ export async function fetchShoppingResults(
     extracted_price: r.extracted_price ?? 0,
     delivery: r.delivery ?? '',
     source: r.source ?? '',
-    link: r.link ?? '',
+    link: r.link ?? r.product_link ?? '',
     thumbnail: r.thumbnail ?? '',
   }))
 }
