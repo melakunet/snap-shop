@@ -109,19 +109,20 @@ async function main() {
 
   const sorted = [...latencies].sort((a, b) => a - b)
   const p50 = percentile(sorted, 50)
-  const p90 = percentile(sorted, 90)
+  const p95 = percentile(sorted, 95)
   const min = sorted[0]
   const max = sorted[sorted.length - 1]
 
-  console.log(`\n  Latency — min:${min}ms  P50:${p50}ms  P90:${p90}ms  max:${max}ms`)
+  console.log(`\n  Latency — min:${min}ms  P50:${p50}ms  P95:${p95}ms  max:${max}ms`)
   console.log(`  Runs with data: ${latencies.length}/${RUNS}`)
 
   const p50Pass = p50 < P50_MAX_MS
   const overallPass = allPass && p50Pass && latencies.length === RUNS
 
-  if (!p50Pass) console.error(`  P50 ${p50}ms exceeds limit of ${P50_MAX_MS}ms`)
-  if (!allPass) console.error(`  One or more runs returned fewer than ${MIN_PRICES} prices`)
+  if (!p50Pass) console.error(`  P50 ${p50}ms exceeds limit of ${P50_MAX_MS}ms — HARD FAIL`)
+  if (!allPass) console.error(`  One or more runs returned fewer than ${MIN_PRICES} prices — HARD FAIL`)
 
+  console.log(`\nP50: ${p50}ms  P95: ${p95}ms`)
   console.log(`\n${overallPass ? 'PASS' : 'FAIL'} — median ${p50}ms < ${P50_MAX_MS}ms, ${latencies.length === RUNS ? `all ${RUNS} runs ≥${MIN_PRICES} prices` : 'some runs failed'}\n`)
   process.exit(overallPass ? 0 : 1)
 }
