@@ -82,6 +82,10 @@ final class CameraSession: NSObject, ObservableObject {
             photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
+
+    func publishImage(_ data: Data) {
+        DispatchQueue.main.async { self.capturedImageData = data }
+    }
 }
 
 extension CameraSession: AVCapturePhotoCaptureDelegate {

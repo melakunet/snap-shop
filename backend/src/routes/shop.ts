@@ -3,12 +3,29 @@ import type { Env, Variables, ShopItem } from '../lib/schema'
 import { ShopRequest } from '../lib/schema'
 import { errorBody } from '../lib/errors'
 import { fetchShoppingResults } from '../services/serpapi'
+import { fetchBestBuyPrices } from '../services/bestbuy'
+import { fetchEbayPrices } from '../services/ebay'
 import { buildShopCacheKey, cacheGet, cacheSet } from '../services/cache'
 import { captureError } from '../lib/sentry'
 
 const route = new Hono<{ Bindings: Env; Variables: Variables }>()
 
-// POST /shop — SerpAPI google_shopping with retailer whitelist + 1-hour cache
+function deduplicateByUrl(items: ShopItem[]): ShopItem[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    if (!item.link || seen.has(item.link)) return false
+    seen.add(item.link)
+    return true
+  })
+}
+
+function applyWhitelist(items: ShopItem[], whitelist: string[]): ShopItem[] {
+  if (whitelist.length === 0) return items
+  const normalized = whitelist.map((w) => w.toLowerCase())
+  return items.filter((item) => normalized.some((w) => item.source.toLowerCase().includes(w)))
+}
+
+// POST /shop — Best Buy + eBay in parallel, SerpAPI as fallback/supplement, 1-hour cache
 route.post('/', async (c) => {
   let body: unknown
   try {
@@ -25,7 +42,7 @@ route.post('/', async (c) => {
 
   const { query, retailer_whitelist } = parsed.data
 
-  // Cache check — before SerpAPI, independent of any quota
+  // Cache check — before any API calls
   let cacheKey = ''
   try {
     cacheKey = await buildShopCacheKey(query, retailer_whitelist)
@@ -45,9 +62,36 @@ route.post('/', async (c) => {
   }
 
   try {
-    const results = await fetchShoppingResults(query, retailer_whitelist, c.env)
+    // Step 1 — Run Best Buy + eBay in parallel (free tier, gracefully return [] when keys absent)
+    const [bestBuyResults, ebayResults] = await Promise.all([
+      fetchBestBuyPrices(query, c.env),
+      fetchEbayPrices(query, c.env),
+    ])
 
-    // Store result in cache (fire-and-forget on failure)
+    const merged: ShopItem[] = [...bestBuyResults, ...ebayResults]
+    const coveredSources = new Set(merged.map((r) => r.source))
+
+    // Step 2 — Use SerpAPI if we need more results or whitelist requires sources not yet covered
+    const needsSerpApi =
+      merged.length < 5 ||
+      (retailer_whitelist.length > 0 &&
+        !retailer_whitelist.every((w) =>
+          [...coveredSources].some((s) => s.toLowerCase().includes(w.toLowerCase())),
+        ))
+
+    if (needsSerpApi) {
+      const serpResults = await fetchShoppingResults(query, retailer_whitelist, c.env)
+      merged.push(...serpResults)
+    }
+
+    // Step 3 — Whitelist, deduplicate by URL, sort by price, take top 10
+    const whitelisted = applyWhitelist(merged, retailer_whitelist)
+    const deduped = deduplicateByUrl(whitelisted)
+    const results = deduped
+      .sort((a, b) => a.extracted_price - b.extracted_price)
+      .slice(0, 10)
+
+    // Store in cache (fire-and-forget on failure)
     if (cacheKey) {
       cacheSet(cacheKey, results, 3600, c.env).catch((err: unknown) => {
         void captureError(c.env.SENTRY_DSN, {

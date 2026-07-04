@@ -2,6 +2,8 @@ import { Hono } from 'hono'
 import type { Env, Variables } from '../lib/schema'
 import { errorBody } from '../lib/errors'
 import { identifyWithClaude } from '../services/claude'
+import { identifyWithGroq } from '../services/groq'
+import { lookupBarcode } from '../services/barcode'
 import { captureError } from '../lib/sentry'
 
 const route = new Hono<{ Bindings: Env; Variables: Variables }>()
@@ -19,7 +21,8 @@ function toBase64(buf: ArrayBuffer): string {
   return btoa(binary)
 }
 
-// POST /identify/precision — Claude Vision (Sonnet 4.6 default, Opus 4.7 for Pro + low confidence)
+// POST /identify/precision
+// Provider chain: barcode (if provided) → Groq Llama 4 Scout → Claude Sonnet (→ Opus for pro+low conf)
 route.post('/', async (c) => {
   const isPro = c.req.header('X-Tier') === 'pro'
 
@@ -29,6 +32,10 @@ route.post('/', async (c) => {
   } catch {
     return c.json(errorBody('invalid_input', 'Expected multipart/form-data'), 400)
   }
+
+  // Optional barcode field — fast-path if present
+  const barcodeField = formData.get('barcode')
+  const barcode = typeof barcodeField === 'string' ? barcodeField.trim() : null
 
   const field = formData.get('image')
   if (!field || typeof field === 'string') {
@@ -44,11 +51,33 @@ route.post('/', async (c) => {
     return c.json(errorBody('invalid_input', 'image must be smaller than 10 MB'), 400)
   }
 
-  const imageBase64 = toBase64(await file.arrayBuffer())
-
   try {
-    const result = await identifyWithClaude(imageBase64, file.type, c.env, isPro)
-    return c.json(result)
+    // Step 1 — barcode fast-path (returns confidence 0.99 on hit)
+    if (barcode) {
+      const barcodeResult = await lookupBarcode(barcode, c.env)
+      if (barcodeResult) {
+        return c.json({
+          brand: barcodeResult.brand,
+          model: barcodeResult.name,
+          category: 'product',
+          distinguishing_features: [],
+          confidence: barcodeResult.confidence,
+          search_query: barcodeResult.search_query,
+        })
+      }
+    }
+
+    const imageBase64 = toBase64(await file.arrayBuffer())
+
+    // Step 2 — Groq Llama 4 Scout (free first-pass, skipped if key absent)
+    const groqResult = await identifyWithGroq(imageBase64, file.type, c.env)
+    if (groqResult && groqResult.confidence >= 0.6) {
+      return c.json(groqResult)
+    }
+
+    // Step 3 — Claude Sonnet (escalates to Opus for pro + low confidence)
+    const claudeResult = await identifyWithClaude(imageBase64, file.type, c.env, isPro)
+    return c.json(claudeResult)
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err))
     await captureError(c.env.SENTRY_DSN, {
