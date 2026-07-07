@@ -16,6 +16,10 @@ struct CameraView: View {
     @State private var deepPulse = false
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var showFileImporter = false
+    #if DEBUG
+    @State private var isDebugScanning = false
+    @State private var debugTask: Task<Void, Never>?
+    #endif
 
     private var modeColor: Color {
         scanMode == .precision ? Color.Brand.accent : Color.Brand.scanDeep
@@ -44,6 +48,9 @@ struct CameraView: View {
                 shutterArea
                     .padding(.bottom, Spacing.xxxl)
             }
+            #if DEBUG
+            debugScanOverlay
+            #endif
         }
         .onAppear { session.start() }
         .onDisappear { session.stop() }
@@ -336,6 +343,53 @@ struct CameraView: View {
         }
         .padding(.horizontal, Spacing.xl)
     }
+
+    // MARK: — Debug (compiled out in Release builds)
+
+    #if DEBUG
+    private var debugScanOverlay: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button {
+                    guard let data = session.capturedImageData else {
+                        print("[DEBUG] No image — capture or pick one first")
+                        return
+                    }
+                    debugTask?.cancel()
+                    debugTask = Task {
+                        isDebugScanning = true
+                        do {
+                            let (product, prices) = try await BackendClient.scan(imageData: data)
+                            print("[DEBUG] ✅ \(product.brand) \(product.model) (\(product.category))")
+                            print("[DEBUG] 🔍 Query: \(product.searchQuery)")
+                            print("[DEBUG] 📊 Confidence: \(String(format: "%.2f", product.confidence))")
+                            prices.forEach {
+                                print("[DEBUG] 💰 \($0.source): \($0.price) · \($0.delivery)")
+                            }
+                        } catch {
+                            print("[DEBUG] ❌ scan() error: \(error)")
+                        }
+                        isDebugScanning = false
+                    }
+                } label: {
+                    Text(isDebugScanning ? "Scanning…" : "⚡ Scan API")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.yellow)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(.black.opacity(0.7))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().strokeBorder(.yellow.opacity(0.5), lineWidth: 1))
+                }
+                .disabled(isDebugScanning || session.capturedImageData == nil)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
+            Spacer()
+        }
+    }
+    #endif
 }
 
 // MARK: — Corner-bracket Shape (Precision mode)

@@ -13,7 +13,8 @@ const route = new Hono<{ Bindings: Env; Variables: Variables }>()
 function deduplicateByUrl(items: ShopItem[]): ShopItem[] {
   const seen = new Set<string>()
   return items.filter((item) => {
-    if (!item.link || seen.has(item.link)) return false
+    if (!item.link) return true  // no link = no basis for dedup, always include
+    if (seen.has(item.link)) return false
     seen.add(item.link)
     return true
   })
