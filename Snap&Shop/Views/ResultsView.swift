@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 struct PriceResult: Identifiable {
     let id = UUID()
@@ -28,6 +29,7 @@ struct ResultsView: View {
 
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
 
     init(
         scanMode: ScanMode = .precision,
@@ -64,7 +66,12 @@ struct ResultsView: View {
                 let (product, items) = try await BackendClient.scan(imageData: data)
                 identifyResult = product
                 let priceResults = mapToPriceResults(items)
-                phase = priceResults.isEmpty ? .empty : .loaded(priceResults)
+                if priceResults.isEmpty {
+                    phase = .empty
+                } else {
+                    phase = .loaded(priceResults)
+                    saveScan(product: product, items: items)
+                }
             } catch is CancellationError {
                 // User navigated away before the response arrived — no UI update needed.
             } catch {
@@ -85,6 +92,32 @@ struct ResultsView: View {
         case .error(let msg):
             errorView(msg)
         }
+    }
+
+    // MARK: — Persistence
+
+    private func saveScan(product: IdentifyResult, items: [ShopItem]) {
+        let name = [product.brand, product.model].filter { !$0.isEmpty }.joined(separator: " ")
+        let lowestPrice = items.min(by: { $0.extractedPrice < $1.extractedPrice })?.extractedPrice ?? 0
+        let record = ScanRecord(
+            productName: name.isEmpty ? product.category.capitalized : name,
+            mode: scanMode == .precision ? "precision" : "deep",
+            thumbnailData: downsampleImageData(imageData, maxDimension: 120),
+            lowestPrice: lowestPrice,
+            searchQuery: product.searchQuery
+        )
+        modelContext.insert(record)
+    }
+
+    /// Resize image to at most maxDimension px on the longest side, return JPEG data.
+    private func downsampleImageData(_ data: Data?, maxDimension: CGFloat) -> Data? {
+        guard let data, let image = UIImage(data: data) else { return nil }
+        let scale = min(maxDimension / image.size.width, maxDimension / image.size.height, 1)
+        guard scale < 1 else { return image.jpegData(compressionQuality: 0.7) }
+        let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: newSize)) }
+        return resized.jpegData(compressionQuality: 0.7)
     }
 
     // MARK: — ShopItem → PriceResult
@@ -383,8 +416,8 @@ extension PriceResult {
     ]
 }
 
-#Preview("Loaded — Precision") { NavigationStack { ResultsView() } }
-#Preview("Loaded — Deep")      { NavigationStack { ResultsView(scanMode: .deep) } }
-#Preview("Loading")            { NavigationStack { ResultsView(phase: .loading) } }
-#Preview("Empty")              { NavigationStack { ResultsView(phase: .empty) } }
-#Preview("Error")              { NavigationStack { ResultsView(phase: .error("Network connection lost. Check your Wi-Fi.")) } }
+#Preview("Loaded — Precision") { NavigationStack { ResultsView() }.modelContainer(for: ScanRecord.self, inMemory: true) }
+#Preview("Loaded — Deep")      { NavigationStack { ResultsView(scanMode: .deep) }.modelContainer(for: ScanRecord.self, inMemory: true) }
+#Preview("Loading")            { NavigationStack { ResultsView(phase: .loading) }.modelContainer(for: ScanRecord.self, inMemory: true) }
+#Preview("Empty")              { NavigationStack { ResultsView(phase: .empty) }.modelContainer(for: ScanRecord.self, inMemory: true) }
+#Preview("Error")              { NavigationStack { ResultsView(phase: .error("Network connection lost.")) }.modelContainer(for: ScanRecord.self, inMemory: true) }
