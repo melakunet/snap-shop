@@ -7,6 +7,8 @@ struct PriceResult: Identifiable {
     let shipping: String
     let rating: String
     let isBest: Bool
+    let link: String
+    let thumbnail: String
 }
 
 enum ResultsPhase {
@@ -18,31 +20,55 @@ enum ResultsPhase {
 
 struct ResultsView: View {
     var scanMode: ScanMode
+    var imageData: Data?
     @State private var phase: ResultsPhase
+    @State private var identifyResult: IdentifyResult?
     @State private var isSaved = false
+    @State private var fetchID = 0
 
-    init(scanMode: ScanMode = .precision, phase: ResultsPhase = .loaded(PriceResult.samples)) {
+    @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
+
+    init(
+        scanMode: ScanMode = .precision,
+        imageData: Data? = nil,
+        phase: ResultsPhase = .loaded(PriceResult.samples)
+    ) {
         self.scanMode = scanMode
-        _phase = State(initialValue: phase)
+        self.imageData = imageData
+        // Auto-start in loading state when real image data is provided.
+        // Previews without imageData fall through to the supplied phase (defaults to samples).
+        _phase = State(initialValue: imageData != nil ? .loading : phase)
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.Brand.background.ignoresSafeArea()
-                content
+        ZStack {
+            Color.Brand.background.ignoresSafeArea()
+            content
+        }
+        .navigationTitle("Results")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Image("AppLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
             }
-            .navigationTitle("Results")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Image("AppLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 28, height: 28)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
-                saveButton
+            saveButton
+        }
+        .task(id: fetchID) {
+            guard let data = imageData, case .loading = phase else { return }
+            do {
+                let (product, items) = try await BackendClient.scan(imageData: data)
+                identifyResult = product
+                let priceResults = mapToPriceResults(items)
+                phase = priceResults.isEmpty ? .empty : .loaded(priceResults)
+            } catch is CancellationError {
+                // User navigated away before the response arrived — no UI update needed.
+            } catch {
+                phase = .error(error.localizedDescription)
             }
         }
     }
@@ -58,6 +84,25 @@ struct ResultsView: View {
             emptyView
         case .error(let msg):
             errorView(msg)
+        }
+    }
+
+    // MARK: — ShopItem → PriceResult
+
+    private func mapToPriceResults(_ items: [ShopItem]) -> [PriceResult] {
+        guard !items.isEmpty else { return [] }
+        let sorted = items.sorted { $0.extractedPrice < $1.extractedPrice }
+        let bestPrice = sorted.first?.extractedPrice ?? 0
+        return sorted.map { item in
+            PriceResult(
+                retailer: item.source,
+                price: item.price,
+                shipping: item.delivery,
+                rating: "",
+                isBest: bestPrice > 0 && item.extractedPrice == bestPrice,
+                link: item.link,
+                thumbnail: item.thumbnail
+            )
         }
     }
 
@@ -80,15 +125,23 @@ struct ResultsView: View {
 
     private var productHeader: some View {
         HStack(spacing: Spacing.lg) {
-            Image("product_headphones")
-                .resizable()
-                .scaledToFill()
-                .frame(width: 80, height: 80)
-                .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+            capturedImageThumbnail(size: 80)
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Sony WH-1000XM5 Headphones")
-                    .font(Typography.headline)
-                    .foregroundStyle(Color.Brand.textPrimary)
+                if let result = identifyResult {
+                    let name = [result.brand, result.model]
+                        .filter { !$0.isEmpty }
+                        .joined(separator: " ")
+                    Text(name.isEmpty ? result.category.capitalized : name)
+                        .font(Typography.headline)
+                        .foregroundStyle(Color.Brand.textPrimary)
+                    Text(result.category.capitalized)
+                        .font(Typography.caption)
+                        .foregroundStyle(Color.Brand.textSecondary)
+                } else {
+                    Text("Identified Product")
+                        .font(Typography.headline)
+                        .foregroundStyle(Color.Brand.textPrimary)
+                }
                 modeBadge
             }
         }
@@ -113,7 +166,10 @@ struct ResultsView: View {
                         .foregroundStyle(Color.Brand.textPrimary)
                     if result.isBest { bestBadge }
                 }
-                Text("\(result.shipping) shipping · \(result.rating)")
+                let subtitle = result.rating.isEmpty
+                    ? result.shipping
+                    : "\(result.shipping) · \(result.rating)"
+                Text(subtitle)
                     .font(Typography.caption)
                     .foregroundStyle(Color.Brand.textSecondary)
             }
@@ -122,9 +178,14 @@ struct ResultsView: View {
                 Text(result.price)
                     .font(Typography.callout.weight(.bold))
                     .foregroundStyle(result.isBest ? Color.Brand.success : Color.Brand.textPrimary)
-                Button("View") {}
-                    .font(Typography.caption.weight(.semibold))
-                    .foregroundStyle(Color.Brand.accent)
+                Button("View") {
+                    if !result.link.isEmpty, let url = URL(string: result.link) {
+                        openURL(url)
+                    }
+                }
+                .font(Typography.caption.weight(.semibold))
+                .foregroundStyle(Color.Brand.accent)
+                .disabled(result.link.isEmpty)
             }
         }
         .padding(Spacing.lg)
@@ -159,7 +220,8 @@ struct ResultsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 HStack(spacing: Spacing.lg) {
-                    ShimmerRect(height: 80).frame(width: 80)
+                    // Show the captured image immediately while identification runs.
+                    capturedImageThumbnail(size: 80)
                     VStack(alignment: .leading, spacing: Spacing.sm) {
                         ShimmerRect(height: 18).frame(width: 180)
                         ShimmerRect(height: 14).frame(width: 90)
@@ -175,6 +237,21 @@ struct ResultsView: View {
             }
             .padding(.top, Spacing.xl)
         }
+    }
+
+    /// Captured image preview or grey placeholder at a given square size.
+    private func capturedImageThumbnail(size: CGFloat) -> some View {
+        Group {
+            if let data = imageData, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color.Brand.surfaceAlt
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: Radius.md))
     }
 
     private var skeletonRow: some View {
@@ -202,7 +279,7 @@ struct ResultsView: View {
                 body: "We couldn't match this product.\nTry Deep Scan for a better result.",
                 actionLabel: "Try Deep Scan"
             )
-        ) { phase = .loading }
+        ) { dismiss() }
     }
 
     // MARK: — Error
@@ -216,7 +293,10 @@ struct ResultsView: View {
                 body: message,
                 actionLabel: "Try Again"
             )
-        ) { phase = .loading }
+        ) {
+            phase = .loading
+            fetchID += 1
+        }
     }
 
     // MARK: — Shared centred layout
@@ -291,20 +371,20 @@ private struct ShimmerRect: View {
     }
 }
 
-// MARK: — Sample data
+// MARK: — Sample data (previews only)
 
 extension PriceResult {
     static let samples: [PriceResult] = [
-        PriceResult(retailer: "Amazon", price: "$279.99", shipping: "Free", rating: "4.8★", isBest: true),
-        PriceResult(retailer: "Walmart", price: "$289.95", shipping: "$5.99", rating: "4.6★", isBest: false),
-        PriceResult(retailer: "Best Buy", price: "$299.99", shipping: "Free", rating: "4.7★", isBest: false),
-        PriceResult(retailer: "eBay", price: "$259.00", shipping: "$12.00", rating: "4.4★", isBest: false),
-        PriceResult(retailer: "Target", price: "$319.99", shipping: "Free", rating: "4.5★", isBest: false)
+        PriceResult(retailer: "Amazon",   price: "$279.99", shipping: "Free",   rating: "4.8★", isBest: true,  link: "", thumbnail: ""),
+        PriceResult(retailer: "Walmart",  price: "$289.95", shipping: "$5.99",  rating: "4.6★", isBest: false, link: "", thumbnail: ""),
+        PriceResult(retailer: "Best Buy", price: "$299.99", shipping: "Free",   rating: "4.7★", isBest: false, link: "", thumbnail: ""),
+        PriceResult(retailer: "eBay",     price: "$259.00", shipping: "$12.00", rating: "4.4★", isBest: false, link: "", thumbnail: ""),
+        PriceResult(retailer: "Target",   price: "$319.99", shipping: "Free",   rating: "4.5★", isBest: false, link: "", thumbnail: ""),
     ]
 }
 
-#Preview("Loaded — Precision") { ResultsView() }
-#Preview("Loaded — Deep") { ResultsView(scanMode: .deep) }
-#Preview("Loading") { ResultsView(phase: .loading) }
-#Preview("Empty") { ResultsView(phase: .empty) }
-#Preview("Error") { ResultsView(phase: .error("Network connection lost. Check your Wi-Fi.")) }
+#Preview("Loaded — Precision") { NavigationStack { ResultsView() } }
+#Preview("Loaded — Deep")      { NavigationStack { ResultsView(scanMode: .deep) } }
+#Preview("Loading")            { NavigationStack { ResultsView(phase: .loading) } }
+#Preview("Empty")              { NavigationStack { ResultsView(phase: .empty) } }
+#Preview("Error")              { NavigationStack { ResultsView(phase: .error("Network connection lost. Check your Wi-Fi.")) } }

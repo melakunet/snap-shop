@@ -1,10 +1,3 @@
-//
-//  ContentView.swift
-//  Snap&Shop
-//
-//  Created by Etefworkie Melaku on 2026-05-29.
-//
-
 import SwiftUI
 
 struct ContentView: View {
@@ -31,9 +24,12 @@ struct RootTabView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            CameraView()
-                .tabItem { Label("Scan", systemImage: "camera") }
-                .tag(Tab.scan)
+            // Each tab owns its NavigationStack so nav state is isolated per tab.
+            NavigationStack {
+                CameraView()
+            }
+            .tabItem { Label("Scan", systemImage: "camera") }
+            .tag(Tab.scan)
 
             HistoryView()
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }

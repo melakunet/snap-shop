@@ -16,6 +16,7 @@ struct CameraView: View {
     @State private var deepPulse = false
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var showFileImporter = false
+    @State private var showResults = false
     #if DEBUG
     @State private var isDebugScanning = false
     @State private var debugTask: Task<Void, Never>?
@@ -84,6 +85,19 @@ struct CameraView: View {
                 }
             case .failure:
                 break
+            }
+        }
+        // Navigate to results as soon as capturedImageData is set.
+        .onChange(of: session.capturedImageData) { _, newData in
+            if newData != nil { showResults = true }
+        }
+        // Clear the captured image when the user pops back so a fresh scan is required.
+        .onChange(of: showResults) { _, isShowing in
+            if !isShowing { session.capturedImageData = nil }
+        }
+        .navigationDestination(isPresented: $showResults) {
+            if let data = session.capturedImageData {
+                ResultsView(scanMode: scanMode, imageData: data)
             }
         }
     }
