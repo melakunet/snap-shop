@@ -44,6 +44,38 @@ For local development, copy the template from `.dev.vars` and fill in values. Th
 | `npm run type-check` | TypeScript type-check without emitting |
 | `npm run deploy` | Deploy to Cloudflare Workers production environment |
 | `npm run deploy:dev` | Deploy to default (dev) Workers environment |
+| `npm run latency` | Run latency benchmark and Phase-1 exit gate (see below) |
+
+## Latency Check / Exit Gate
+
+**Gate:** P50(identify→shop end-to-end) < 6 000 ms
+
+The `latency` script runs three benchmark suites against a live backend and checks the Phase-1 exit gate. The backend must be running with `DEV_AUTH_BYPASS=1` — the script sends no auth header.
+
+```bash
+# Start the dev backend first (in a separate terminal):
+cd backend && npm run dev
+
+# Then run the latency check:
+SMOKE_URL=http://localhost:8787 npm run latency
+```
+
+Flags (all optional):
+
+| Flag | Default | Description |
+|---|---|---|
+| `--url=<url>` | `$SMOKE_URL` | Target base URL (required if env var not set) |
+| `--n-identify=<n>` | 10 | Runs for `/identify/precision` + chained `/shop` (e2e gate) |
+| `--n-deep=<n>` | 10 | Runs for `/identify/deep` (8 frames each) |
+| `--n-shop=<n>` | 5 | Runs for `/shop` isolated (cache-busted — consumes SerpAPI quota) |
+
+Example with custom counts:
+
+```bash
+SMOKE_URL=http://localhost:8787 npm run latency -- --n-identify=20 --n-shop=3
+```
+
+Exit code `0` = gate PASS; `1` = gate FAIL or run errors.
 
 ## API Endpoints
 
