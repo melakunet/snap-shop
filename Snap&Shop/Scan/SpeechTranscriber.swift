@@ -10,7 +10,7 @@ import Foundation
 /// Video file path: SFSpeechURLRecognitionRequest (on-device) → BackendClient.transcribeAudio (Groq).
 @MainActor
 final class SpeechTranscriber: ObservableObject {
-    enum Phase {
+    enum Phase: Equatable {
         case idle
         case requestingPermission
         case listening

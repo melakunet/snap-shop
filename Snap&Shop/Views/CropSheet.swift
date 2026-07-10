@@ -189,8 +189,8 @@ struct CropSheet: View {
                 let dx = drag.translation.width  / frame.width
                 let dy = drag.translation.height / frame.height
                 cropRect = CGRect(
-                    x: (start.minX + dx).clamped(to: 0...(1 - start.width)),
-                    y: (start.minY + dy).clamped(to: 0...(1 - start.height)),
+                    x: min(max(start.minX + dx, 0), 1 - start.width),
+                    y: min(max(start.minY + dy, 0), 1 - start.height),
                     width: start.width, height: start.height
                 )
             }
@@ -214,17 +214,17 @@ struct CropSheet: View {
         var x1 = start.maxX, y1 = start.maxY
         switch corner {
         case .topLeft:
-            x0 = (x0 + dx).clamped(to: 0...(x1 - minFraction))
-            y0 = (y0 + dy).clamped(to: 0...(y1 - minFraction))
+            x0 = min(max(x0 + dx, 0), x1 - minFraction)
+            y0 = min(max(y0 + dy, 0), y1 - minFraction)
         case .topRight:
-            x1 = (x1 + dx).clamped(to: (x0 + minFraction)...1)
-            y0 = (y0 + dy).clamped(to: 0...(y1 - minFraction))
+            x1 = min(max(x1 + dx, x0 + minFraction), 1)
+            y0 = min(max(y0 + dy, 0), y1 - minFraction)
         case .bottomLeft:
-            x0 = (x0 + dx).clamped(to: 0...(x1 - minFraction))
-            y1 = (y1 + dy).clamped(to: (y0 + minFraction)...1)
+            x0 = min(max(x0 + dx, 0), x1 - minFraction)
+            y1 = min(max(y1 + dy, y0 + minFraction), 1)
         case .bottomRight:
-            x1 = (x1 + dx).clamped(to: (x0 + minFraction)...1)
-            y1 = (y1 + dy).clamped(to: (y0 + minFraction)...1)
+            x1 = min(max(x1 + dx, x0 + minFraction), 1)
+            y1 = min(max(y1 + dy, y0 + minFraction), 1)
         }
         return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
     }

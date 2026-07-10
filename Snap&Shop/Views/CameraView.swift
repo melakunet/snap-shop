@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import PhotosUI
+import UIKit
 import UniformTypeIdentifiers
 
 enum ScanMode {
@@ -19,6 +20,17 @@ struct CameraView: View {
     @State private var showFileImporter = false
     @State private var showVideoImporter = false
     @State private var showResults = false
+    @State private var searchQuery = ""
+    @State private var submittedQuery = ""
+    @FocusState private var searchFocused: Bool
+    @StateObject private var transcriber = SpeechTranscriber()
+    @State private var showTranscriptSheet = false
+    @State private var voiceHint = ""
+    @State private var pastedURL: URL?
+    @State private var showClipboardAlert = false
+    @State private var prefillQuery = ""
+    @State private var showCropSheet = false
+    @State private var pendingUploadData: Data? = nil
     #if DEBUG
     @State private var isDebugScanning = false
     @State private var debugTask: Task<Void, Never>?
@@ -29,6 +41,49 @@ struct CameraView: View {
     }
 
     var body: some View {
+        mainStack
+            .sheet(isPresented: $showTranscriptSheet) { transcriptSheet }
+            .onChange(of: transcriber.partialTranscript) { _, partial in handlePartialTranscript(partial) }
+            .onChange(of: transcriber.phase) { _, phase in handlePhaseChange(phase) }
+            .fullScreenCover(isPresented: $showCropSheet, onDismiss: {
+                // Swipe-to-dismiss is disabled (fullScreenCover), but if dismissed via Cancel
+                // the handler already clears capturedImageData. This is a safety net.
+                if !showResults { session.capturedImageData = nil }
+            }) {
+                if let data = session.capturedImageData {
+                    CropSheet(
+                        imageData: data,
+                        onConfirm: { uploadData in
+                            pendingUploadData = uploadData
+                            showCropSheet = false
+                            showResults = true
+                        },
+                        onCancel: {
+                            showCropSheet = false
+                            session.capturedImageData = nil
+                        }
+                    )
+                }
+            }
+            .navigationDestination(isPresented: $showResults) {
+                if let videoURL = session.capturedVideoURL {
+                    ResultsView(scanMode: .deep, videoURL: videoURL, hint: voiceHint)
+                } else if let data = session.capturedImageData {
+                    ResultsView(scanMode: scanMode, imageData: data, uploadData: pendingUploadData)
+                } else if !submittedQuery.isEmpty {
+                    ResultsView(textQuery: submittedQuery)
+                } else if let url = pastedURL {
+                    ResultsView(productPageURL: url, prefillQuery: $prefillQuery)
+                }
+            }
+            .alert("No URL found", isPresented: $showClipboardAlert) {
+                Button("OK") {}
+            } message: {
+                Text("Copy a product link and try again.")
+            }
+    }
+
+    private var mainStack: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
@@ -40,6 +95,17 @@ struct CameraView: View {
                 modeToggle
                     .padding(.horizontal, Spacing.xxl)
                     .padding(.top, Spacing.lg)
+
+                searchBar
+                    .padding(.horizontal, Spacing.xxl)
+                    .padding(.top, Spacing.sm)
+
+                if !searchFocused && searchQuery.isEmpty {
+                    pasteChip
+                        .padding(.horizontal, Spacing.xxl)
+                        .padding(.top, Spacing.xs)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
                 Spacer()
                 viewfinderContainer
@@ -59,6 +125,7 @@ struct CameraView: View {
         .onDisappear { session.stop() }
         .onChange(of: scanMode) { _, _ in
             withAnimation(.spring(duration: 0.2)) { isScanning = false }
+            searchFocused = false
         }
         .onChange(of: selectedPickerItem) { _, newItem in
             guard let newItem else { return }
@@ -68,7 +135,6 @@ struct CameraView: View {
                         session.publishImage(data)
                     }
                 } catch {
-                    // TODO: show toast (error variant) when toast plumbing lands
                     print("PhotosPicker loadTransferable failed: \(error)")
                 }
             }
@@ -90,13 +156,7 @@ struct CameraView: View {
             case .success(let url):
                 guard url.startAccessingSecurityScopedResource() else { return }
                 defer { url.stopAccessingSecurityScopedResource() }
-                do {
-                    let data = try Data(contentsOf: url)
-                    session.publishImage(data)
-                } catch {
-                    // TODO: show toast (error variant) when toast plumbing lands
-                    print("File importer read failed: \(error)")
-                }
+                if let data = try? Data(contentsOf: url) { session.publishImage(data) }
             case .failure:
                 break
             }
@@ -109,41 +169,39 @@ struct CameraView: View {
             case .success(let url):
                 guard url.startAccessingSecurityScopedResource() else { return }
                 defer { url.stopAccessingSecurityScopedResource() }
-                do {
-                    let tempURL = FileManager.default.temporaryDirectory
-                        .appendingPathComponent(UUID().uuidString + "." + url.pathExtension)
-                    try FileManager.default.copyItem(at: url, to: tempURL)
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString + "." + url.pathExtension)
+                if (try? FileManager.default.copyItem(at: url, to: tempURL)) != nil {
                     session.publishVideo(tempURL)
-                } catch {
-                    print("Video file importer read failed: \(error)")
                 }
             case .failure:
                 break
             }
         }
-        // Navigate to results as soon as capturedImageData or capturedVideoURL is set.
         .onChange(of: session.capturedImageData) { _, newData in
-            if newData != nil { showResults = true }
+            if newData != nil { showCropSheet = true }
         }
         .onChange(of: session.capturedVideoURL) { _, url in
-            if url != nil { showResults = true }
+            guard let url else { return }
+            Task { await transcriber.transcribeVideoAudio(url: url) }
+            showTranscriptSheet = true
         }
-        // Sync isScanning with actual recording state from the session.
         .onChange(of: session.isRecording) { _, recording in
             withAnimation(.spring(duration: 0.2)) { isScanning = recording }
         }
-        // Clear captured image/video when the user pops back so a fresh scan is required.
         .onChange(of: showResults) { _, isShowing in
             if !isShowing {
                 session.capturedImageData = nil
                 session.capturedVideoURL = nil
-            }
-        }
-        .navigationDestination(isPresented: $showResults) {
-            if let videoURL = session.capturedVideoURL {
-                ResultsView(scanMode: .deep, videoURL: videoURL)
-            } else if let data = session.capturedImageData {
-                ResultsView(scanMode: scanMode, imageData: data)
+                submittedQuery = ""
+                voiceHint = ""
+                pastedURL = nil
+                pendingUploadData = nil
+                if !prefillQuery.isEmpty {
+                    searchQuery = prefillQuery
+                    prefillQuery = ""
+                    searchFocused = true
+                }
             }
         }
     }
@@ -330,6 +388,39 @@ struct CameraView: View {
         .animation(.easeInOut(duration: 0.2), value: scanMode)
     }
 
+    // MARK: — Search
+
+    private var searchBar: some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 14))
+                .foregroundStyle(.white.opacity(0.6))
+            TextField("Search by product name…", text: $searchQuery)
+                .font(Typography.callout)
+                .foregroundStyle(.white)
+                .tint(Color.Brand.accent)
+                .focused($searchFocused)
+                .onSubmit { submitTextSearch() }
+                .submitLabel(.search)
+            searchBarTrailingButton
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
+        .background(Color.white.opacity(searchFocused ? 0.14 : 0.10))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
+        .animation(.spring(duration: 0.2), value: searchFocused)
+        .animation(.spring(duration: 0.2), value: searchQuery.isEmpty)
+        .animation(.spring(duration: 0.2), value: isListening)
+    }
+
+    private func submitTextSearch() {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        searchFocused = false
+        submittedQuery = trimmed
+        showResults = true
+    }
+
     // MARK: — Shutter
 
     private var shutterArea: some View {
@@ -427,6 +518,152 @@ struct CameraView: View {
             }
         }
         .padding(.horizontal, Spacing.xl)
+    }
+
+    // MARK: — Paste link
+
+    private var pasteChip: some View {
+        Button(action: handlePasteLink) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "link")
+                    .font(.system(size: 12))
+                Text("Paste link")
+                    .font(Typography.caption.weight(.medium))
+            }
+            .foregroundStyle(.white.opacity(0.7))
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.xs)
+            .background(Color.white.opacity(0.10))
+            .clipShape(Capsule())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func handlePasteLink() {
+        guard let raw = UIPasteboard.general.string,
+              let url = URL(string: raw.trimmingCharacters(in: .whitespaces)),
+              url.scheme == "https" || url.scheme == "http"
+        else {
+            showClipboardAlert = true
+            return
+        }
+        pastedURL = url
+        showResults = true
+    }
+
+    // MARK: — Voice hint
+
+    private func handlePartialTranscript(_ partial: String) {
+        if !showTranscriptSheet { searchQuery = partial } else { voiceHint = partial }
+    }
+
+    private func handlePhaseChange(_ phase: SpeechTranscriber.Phase) {
+        guard case .done(let text) = phase else { return }
+        if showTranscriptSheet { voiceHint = text } else { searchQuery = text; transcriber.reset() }
+    }
+
+    private var isListening: Bool {
+        switch transcriber.phase {
+        case .listening: return true
+        default: return false
+        }
+    }
+
+    private var isTranscribing: Bool {
+        switch transcriber.phase {
+        case .processingFile: return true
+        default: return false
+        }
+    }
+
+    @ViewBuilder
+    private var searchBarTrailingButton: some View {
+        if isListening {
+            Button { transcriber.stopListening() } label: {
+                Image(systemName: "waveform")
+                    .symbolEffect(.variableColor.iterative, isActive: true)
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color.Brand.accent)
+            }
+            .transition(.opacity)
+        } else if searchFocused || !searchQuery.isEmpty {
+            Button("Search") { submitTextSearch() }
+                .font(Typography.caption.weight(.semibold))
+                .foregroundStyle(
+                    searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? Color.Brand.accent.opacity(0.4)
+                        : Color.Brand.accent
+                )
+                .disabled(searchQuery.trimmingCharacters(in: .whitespaces).isEmpty)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+        } else {
+            Button { transcriber.startListening() } label: {
+                Image(systemName: "mic")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private var transcriptSheet: some View {
+        NavigationStack {
+            ZStack {
+                Color.Brand.background.ignoresSafeArea()
+                if isTranscribing {
+                    VStack(spacing: Spacing.lg) {
+                        ProgressView()
+                            .tint(Color.Brand.accent)
+                        Text("Transcribing audio…")
+                            .font(Typography.body)
+                            .foregroundStyle(Color.Brand.textSecondary)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: Spacing.lg) {
+                        Text("Add a hint (optional)")
+                            .font(Typography.headline)
+                            .foregroundStyle(Color.Brand.textPrimary)
+                            .padding(.horizontal, Spacing.xl)
+                        TextEditor(text: $voiceHint)
+                            .font(Typography.body)
+                            .foregroundStyle(Color.Brand.textPrimary)
+                            .frame(minHeight: 120)
+                            .padding(Spacing.md)
+                            .background(Color.Brand.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                            .padding(.horizontal, Spacing.xl)
+                        Text("Edit or add a description to help identify the product.")
+                            .font(Typography.caption)
+                            .foregroundStyle(Color.Brand.textSecondary)
+                            .padding(.horizontal, Spacing.xl)
+                        Spacer()
+                    }
+                    .padding(.top, Spacing.xl)
+                }
+            }
+            .navigationTitle("Voice Hint")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Skip") {
+                        voiceHint = ""
+                        showTranscriptSheet = false
+                        showResults = true
+                    }
+                    .foregroundStyle(Color.Brand.textSecondary)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Start Scan") {
+                        showTranscriptSheet = false
+                        showResults = true
+                    }
+                    .font(Typography.callout.weight(.semibold))
+                    .foregroundStyle(Color.Brand.accent)
+                    .disabled(isTranscribing)
+                }
+            }
+        }
     }
 
     // MARK: — Debug (compiled out in Release builds)

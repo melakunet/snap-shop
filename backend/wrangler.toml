@@ -5,6 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ENVIRONMENT = "dev"
+DEV_AUTH_BYPASS = "1"
 
 # Secrets — set with: wrangler secret put <NAME> [--env production]
 # APPLE_BUNDLE_ID

@@ -22,6 +22,8 @@
 		</dict>
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Snap&amp;Shop uses the microphone when recording video in Deep Scan mode.</string>
+	<string>Snap&amp;Shop uses the microphone when recording video in Deep Scan mode and for voice hints to describe what you're looking for.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Snap&amp;Shop transcribes your voice hints on-device to help identify products. For video scans, audio may be sent to a cloud service if on-device recognition is unavailable.</string>
 </dict>
 </plist>

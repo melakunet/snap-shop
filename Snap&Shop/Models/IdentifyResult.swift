@@ -9,4 +9,5 @@ struct IdentifyResult: Codable {
     let distinguishingFeatures: [String]  // backend: distinguishing_features
     let confidence: Double
     let searchQuery: String               // backend: search_query
+    let imageURL: String?                 // backend: image_url — populated by /identify/url only
 }

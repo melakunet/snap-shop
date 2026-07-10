@@ -53,6 +53,52 @@ enum ImageCropper {
         return jpegData(from: cgImage, quality: 0.1) ?? Data()
     }
 
+    // MARK: — Manual crop (CropSheet API)
+
+    /// Returns the attention-saliency suggested crop rect in normalized coordinates
+    /// (top-left origin, 0–1 range). Falls back to center-80 % when Vision finds nothing.
+    static func saliencyRect(for data: Data) async -> CGRect {
+        await Task.detached(priority: .userInitiated) { () -> CGRect in
+            guard let cgImage = decodeCGImage(from: data) else {
+                return CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
+            }
+            return saliencyNormalizedRect(for: cgImage)
+                ?? CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
+        }.value
+    }
+
+    /// Crop the image to a caller-supplied normalized rect, then downscale + compress.
+    static func prepareForUpload(data: Data, cropRect: CGRect) async -> Data {
+        #if DEBUG
+        let before = data.count
+        #endif
+
+        let result = await Task.detached(priority: .userInitiated) { () -> Data in
+            guard let cgImage = decodeCGImage(from: data) else { return data }
+            let pw = CGFloat(cgImage.width), ph = CGFloat(cgImage.height)
+            let pixelRect = CGRect(
+                x: cropRect.minX * pw, y: cropRect.minY * ph,
+                width: cropRect.width * pw, height: cropRect.height * ph
+            ).intersection(CGRect(x: 0, y: 0, width: pw, height: ph))
+
+            let toCrop: CGImage
+            if pixelRect.width >= 32, pixelRect.height >= 32,
+               let c = cgImage.cropping(to: pixelRect) {
+                toCrop = c
+            } else {
+                toCrop = cgImage
+            }
+            let scaled = downscale(toCrop, maxDimension: uploadMaxDimension)
+            return compress(scaled, maxBytes: uploadMaxBytes)
+        }.value
+
+        #if DEBUG
+        let pct = before > 0 ? result.count * 100 / before : 0
+        print("[ImageCropper] manual crop: \(before / 1_024) KB → \(result.count / 1_024) KB (\(pct)% of original)")
+        #endif
+        return result
+    }
+
     // MARK: — Private
 
     private static func decodeCGImage(from data: Data) -> CGImage? {
@@ -60,8 +106,18 @@ enum ImageCropper {
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
-    /// Attention saliency crop with 20 % padding. Returns nil when no salient region is found.
+    /// Attention-saliency crop with 20 % padding. Returns nil when no salient region is found.
     private static func saliencyCrop(_ cgImage: CGImage) -> CGImage? {
+        guard let norm = saliencyNormalizedRect(for: cgImage) else { return nil }
+        let pw = CGFloat(cgImage.width), ph = CGFloat(cgImage.height)
+        let pixelRect = CGRect(x: norm.minX * pw, y: norm.minY * ph,
+                               width: norm.width * pw, height: norm.height * ph)
+        guard pixelRect.width >= 32, pixelRect.height >= 32 else { return nil }
+        return cgImage.cropping(to: pixelRect)
+    }
+
+    /// Normalized saliency bounding rect (top-left origin). Shared by saliencyCrop and saliencyRect.
+    private static func saliencyNormalizedRect(for cgImage: CGImage) -> CGRect? {
         let request = VNGenerateAttentionBasedSaliencyImageRequest()
         try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
 
@@ -73,21 +129,12 @@ enum ImageCropper {
         // Union all salient bounding boxes (Vision: bottom-left origin, y increases up)
         let union = objects.reduce(CGRect.null) { $0.union($1.boundingBox) }
 
-        // Flip to CGImage top-left origin
+        // Flip to top-left origin, add 20 % padding, clamp to unit square
         let flipped = CGRect(x: union.minX, y: 1 - union.maxY,
                              width: union.width, height: union.height)
-
-        // 20 % padding, clamped to the unit square
-        let padded = flipped
+        return flipped
             .insetBy(dx: -flipped.width * 0.2, dy: -flipped.height * 0.2)
             .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
-
-        let pw = CGFloat(cgImage.width), ph = CGFloat(cgImage.height)
-        let pixelRect = CGRect(x: padded.minX * pw, y: padded.minY * ph,
-                               width: padded.width * pw, height: padded.height * ph)
-
-        guard pixelRect.width >= 32, pixelRect.height >= 32 else { return nil }
-        return cgImage.cropping(to: pixelRect)
     }
 
     /// Center-80 % crop used as fallback when saliency returns no region.
