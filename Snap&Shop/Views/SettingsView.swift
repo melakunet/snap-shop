@@ -1,12 +1,14 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @EnvironmentObject private var authState: AuthState
     @State private var defaultMode: ScanMode = .precision
     @State private var iCloudSync = true
     @State private var priceAlerts = true
     @State private var haptics = true
     @State private var selectedRetailers: Set<String> = Set(Retailer.all.map(\.name))
     @State private var showSignOutConfirm = false
+    @AppStorage("hasOnboarded") private var hasOnboarded = true
 
     var body: some View {
         NavigationStack {
@@ -32,7 +34,7 @@ struct SettingsView: View {
                 }
             }
             .confirmationDialog("Sign out?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
-                Button("Sign Out", role: .destructive) {}
+                Button("Sign Out", role: .destructive) { authState.signOut() }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Your scan history will remain on this device.")
@@ -130,6 +132,13 @@ struct SettingsView: View {
                     .font(Typography.body)
                     .foregroundStyle(Color.Brand.textPrimary)
             }
+            Button {
+                hasOnboarded = false
+            } label: {
+                Text("View intro again")
+                    .font(Typography.body)
+                    .foregroundStyle(Color.Brand.accent)
+            }
         } header: {
             sectionHeader("Privacy & Data")
         }
@@ -139,6 +148,23 @@ struct SettingsView: View {
 
     private var accountSection: some View {
         Section {
+            // Signed-in identity row
+            HStack(spacing: Spacing.md) {
+                Image(systemName: "person.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(Color.Brand.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(authState.displayName ?? "Apple User")
+                        .font(Typography.body)
+                        .foregroundStyle(Color.Brand.textPrimary)
+                    Text("Signed in with Apple")
+                        .font(Typography.caption)
+                        .foregroundStyle(Color.Brand.textSecondary)
+                }
+                Spacer()
+            }
+            .padding(.vertical, Spacing.xs)
+
             Button { showSignOutConfirm = true } label: {
                 Text("Sign Out")
                     .font(Typography.body)
