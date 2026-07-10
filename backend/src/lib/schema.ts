@@ -46,6 +46,7 @@ export type DeepIdentifyResult = z.infer<typeof DeepIdentifyResult>
 export const ShopRequest = z.object({
   query: z.string().min(1, 'query must not be empty'),
   retailer_whitelist: z.array(z.string()),
+  sort: z.enum(['price', 'reviews']).optional().default('price'),
 })
 export type ShopRequest = z.infer<typeof ShopRequest>
 
@@ -56,5 +57,37 @@ export const ShopItem = z.object({
   source: z.string(),
   link: z.string(),
   thumbnail: z.string(),
+  rating: z.number().optional(),
+  review_count: z.number().int().optional(),
+  title: z.string().optional(),
+  snippet: z.string().optional(),
+  product_id: z.string().optional(),
 })
 export type ShopItem = z.infer<typeof ShopItem>
+
+// /product/reviews — request and response
+
+export const ReviewItem = z.object({
+  author: z.string().optional(),
+  rating: z.number().optional(),
+  text: z.string(),
+  date: z.string().optional(),
+})
+export type ReviewItem = z.infer<typeof ReviewItem>
+
+export const RatingBreakdown = z.object({
+  five: z.number().int(),
+  four: z.number().int(),
+  three: z.number().int(),
+  two: z.number().int(),
+  one: z.number().int(),
+})
+export type RatingBreakdown = z.infer<typeof RatingBreakdown>
+
+export const ProductReviews = z.object({
+  rating: z.number(),
+  review_count: z.number().int(),
+  breakdown: RatingBreakdown.optional(),
+  top_reviews: z.array(ReviewItem),
+})
+export type ProductReviews = z.infer<typeof ProductReviews>

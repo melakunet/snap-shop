@@ -1,18 +1,18 @@
 import SwiftUI
 
 struct ContentView: View {
-    /// Persisted across launches so the user returns to where they left off
     @AppStorage("selectedTab") private var selectedTab: Tab = .scan
-    /// Set to true by OnboardingFlow once the user taps "Get started"
     @AppStorage("hasOnboarded") private var hasOnboarded = false
+    @EnvironmentObject private var authState: AuthState
 
     var body: some View {
-        if hasOnboarded {
-            RootTabView(selectedTab: $selectedTab)
+        if !hasOnboarded {
+            OnboardingView { hasOnboarded = true }
+        } else if !authState.isSignedIn {
+            SignInView()
         } else {
-            OnboardingView {
-                hasOnboarded = true
-            }
+            RootTabView(selectedTab: $selectedTab)
+                .task { await authState.checkRevocation() }
         }
     }
 }
@@ -60,4 +60,5 @@ enum Tab: String {
 
 #Preview {
     ContentView()
+        .environmentObject(AuthState())
 }

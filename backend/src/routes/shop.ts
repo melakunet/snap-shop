@@ -10,6 +10,15 @@ import { captureError } from '../lib/sentry'
 
 const route = new Hono<{ Bindings: Env; Variables: Variables }>()
 
+// Bayesian weighted rating: prevents items with few reviews from dominating.
+// score = (v / (v + m)) * R + (m / (v + m)) * C
+// v = review count, R = item rating, m = min-votes threshold, C = global mean
+function bayesianScore(rating: number | undefined, reviewCount: number | undefined, m: number, C: number): number {
+  const v = reviewCount ?? 0
+  const R = rating ?? C
+  return (v / (v + m)) * R + (m / (v + m)) * C
+}
+
 function deduplicateByUrl(items: ShopItem[]): ShopItem[] {
   const seen = new Set<string>()
   return items.filter((item) => {
@@ -41,12 +50,12 @@ route.post('/', async (c) => {
     return c.json(errorBody('invalid_input', msg), 400)
   }
 
-  const { query, retailer_whitelist } = parsed.data
+  const { query, retailer_whitelist, sort } = parsed.data
 
   // Cache check — before any API calls
   let cacheKey = ''
   try {
-    cacheKey = await buildShopCacheKey(query, retailer_whitelist)
+    cacheKey = await buildShopCacheKey(query, retailer_whitelist, sort)
     const cached = await cacheGet<ShopItem[]>(cacheKey, c.env)
     if (cached !== null) {
       console.log(JSON.stringify({ cache: 'hit', key: cacheKey }))
@@ -85,12 +94,25 @@ route.post('/', async (c) => {
       merged.push(...serpResults)
     }
 
-    // Step 3 — Whitelist, deduplicate by URL, sort by price, take top 10
+    // Step 3 — Whitelist, deduplicate by URL, sort, take top 10
     const whitelisted = applyWhitelist(merged, retailer_whitelist)
     const deduped = deduplicateByUrl(whitelisted)
-    const results = deduped
-      .sort((a, b) => a.extracted_price - b.extracted_price)
-      .slice(0, 10)
+
+    let results: ShopItem[]
+    if (sort === 'reviews') {
+      const m = 50
+      const ratedItems = deduped.filter((item) => item.rating != null && (item.review_count ?? 0) > 0)
+      const C = ratedItems.length > 0
+        ? ratedItems.reduce((sum, item) => sum + (item.rating ?? 0), 0) / ratedItems.length
+        : 4.0
+      results = deduped
+        .sort((a, b) => bayesianScore(b.rating, b.review_count, m, C) - bayesianScore(a.rating, a.review_count, m, C))
+        .slice(0, 10)
+    } else {
+      results = deduped
+        .sort((a, b) => a.extracted_price - b.extracted_price)
+        .slice(0, 10)
+    }
 
     // Store in cache (fire-and-forget on failure)
     if (cacheKey) {

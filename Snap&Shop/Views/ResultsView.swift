@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 import SwiftData
 
@@ -22,7 +23,9 @@ enum ResultsPhase {
 struct ResultsView: View {
     var scanMode: ScanMode
     var imageData: Data?
+    var videoURL: URL?
     @State private var phase: ResultsPhase
+    @State private var videoPlayer: AVPlayer?
     @State private var identifyResult: IdentifyResult?
     @State private var isSaved = false
     @State private var fetchID = 0
@@ -34,13 +37,15 @@ struct ResultsView: View {
     init(
         scanMode: ScanMode = .precision,
         imageData: Data? = nil,
+        videoURL: URL? = nil,
         phase: ResultsPhase = .loaded(PriceResult.samples)
     ) {
         self.scanMode = scanMode
         self.imageData = imageData
-        // Auto-start in loading state when real image data is provided.
-        // Previews without imageData fall through to the supplied phase (defaults to samples).
-        _phase = State(initialValue: imageData != nil ? .loading : phase)
+        self.videoURL = videoURL
+        let autoStart = imageData != nil || videoURL != nil
+        _phase = State(initialValue: autoStart ? .loading : phase)
+        _videoPlayer = State(initialValue: videoURL.map { AVPlayer(url: $0) })
     }
 
     var body: some View {
@@ -61,16 +66,27 @@ struct ResultsView: View {
             saveButton
         }
         .task(id: fetchID) {
-            guard let data = imageData, case .loading = phase else { return }
+            guard case .loading = phase else { return }
             do {
-                let (product, items) = try await BackendClient.scan(imageData: data)
+                let (product, items): (IdentifyResult, [ShopItem])
+                if let data = imageData {
+                    (product, items) = try await BackendClient.scan(imageData: data)
+                } else if let url = videoURL {
+                    (product, items) = try await BackendClient.scanDeep(videoURL: url)
+                } else {
+                    return
+                }
                 identifyResult = product
                 let priceResults = mapToPriceResults(items)
                 if priceResults.isEmpty {
                     phase = .empty
                 } else {
                     phase = .loaded(priceResults)
-                    saveScan(product: product, items: items)
+                    if imageData != nil {
+                        saveScan(product: product, items: items)
+                    } else if let url = videoURL {
+                        await saveScanDeep(product: product, items: items, videoURL: url)
+                    }
                 }
             } catch is CancellationError {
                 // User navigated away before the response arrived — no UI update needed.
@@ -78,6 +94,8 @@ struct ResultsView: View {
                 phase = .error(error.localizedDescription)
             }
         }
+        .onAppear { videoPlayer?.play() }
+        .onDisappear { videoPlayer?.pause() }
     }
 
     @ViewBuilder
@@ -103,6 +121,20 @@ struct ResultsView: View {
             productName: name.isEmpty ? product.category.capitalized : name,
             mode: scanMode == .precision ? "precision" : "deep",
             thumbnailData: downsampleImageData(imageData, maxDimension: 120),
+            lowestPrice: lowestPrice,
+            searchQuery: product.searchQuery
+        )
+        modelContext.insert(record)
+    }
+
+    private func saveScanDeep(product: IdentifyResult, items: [ShopItem], videoURL: URL) async {
+        let name = [product.brand, product.model].filter { !$0.isEmpty }.joined(separator: " ")
+        let lowestPrice = items.min(by: { $0.extractedPrice < $1.extractedPrice })?.extractedPrice ?? 0
+        let thumbnailData = await BackendClient.extractThumbnail(from: videoURL)
+        let record = ScanRecord(
+            productName: name.isEmpty ? product.category.capitalized : name,
+            mode: "deep",
+            thumbnailData: thumbnailData,
             lowestPrice: lowestPrice,
             searchQuery: product.searchQuery
         )
@@ -156,27 +188,41 @@ struct ResultsView: View {
         }
     }
 
+    @ViewBuilder
     private var productHeader: some View {
-        HStack(spacing: Spacing.lg) {
-            capturedImageThumbnail(size: 80)
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                if let result = identifyResult {
-                    let name = [result.brand, result.model]
-                        .filter { !$0.isEmpty }
-                        .joined(separator: " ")
-                    Text(name.isEmpty ? result.category.capitalized : name)
-                        .font(Typography.headline)
-                        .foregroundStyle(Color.Brand.textPrimary)
-                    Text(result.category.capitalized)
-                        .font(Typography.caption)
-                        .foregroundStyle(Color.Brand.textSecondary)
-                } else {
-                    Text("Identified Product")
-                        .font(Typography.headline)
-                        .foregroundStyle(Color.Brand.textPrimary)
-                }
-                modeBadge
+        if let player = videoPlayer {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                VideoPlayer(player: player)
+                    .frame(height: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                productInfo
             }
+        } else {
+            HStack(spacing: Spacing.lg) {
+                capturedImageThumbnail(size: 80)
+                productInfo
+            }
+        }
+    }
+
+    private var productInfo: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            if let result = identifyResult {
+                let name = [result.brand, result.model]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " ")
+                Text(name.isEmpty ? result.category.capitalized : name)
+                    .font(Typography.headline)
+                    .foregroundStyle(Color.Brand.textPrimary)
+                Text(result.category.capitalized)
+                    .font(Typography.caption)
+                    .foregroundStyle(Color.Brand.textSecondary)
+            } else {
+                Text("Identified Product")
+                    .font(Typography.headline)
+                    .foregroundStyle(Color.Brand.textPrimary)
+            }
+            modeBadge
         }
     }
 
@@ -252,16 +298,26 @@ struct ResultsView: View {
     private var loadingView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
-                HStack(spacing: Spacing.lg) {
-                    // Show the captured image immediately while identification runs.
-                    capturedImageThumbnail(size: 80)
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        ShimmerRect(height: 18).frame(width: 180)
-                        ShimmerRect(height: 14).frame(width: 90)
+                if let player = videoPlayer {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        VideoPlayer(player: player)
+                            .frame(height: 200)
+                            .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                        ShimmerRect(height: 18).frame(width: 200)
                     }
-                    Spacer()
+                    .padding(.horizontal, Spacing.xl)
+                } else {
+                    HStack(spacing: Spacing.lg) {
+                        // Show the captured image immediately while identification runs.
+                        capturedImageThumbnail(size: 80)
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            ShimmerRect(height: 18).frame(width: 180)
+                            ShimmerRect(height: 14).frame(width: 90)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, Spacing.xl)
                 }
-                .padding(.horizontal, Spacing.xl)
 
                 VStack(spacing: Spacing.sm) {
                     ForEach(0..<4, id: \.self) { _ in skeletonRow }

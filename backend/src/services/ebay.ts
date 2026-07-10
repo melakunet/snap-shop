@@ -42,6 +42,7 @@ export async function fetchEbayPrices(query: string, env: Env): Promise<ShopItem
         source: 'eBay',
         link: item.itemWebUrl ?? '',
         thumbnail: item.image?.imageUrl ?? '',
+        ...(item.title ? { title: item.title } : {}),
       }
     })
   } catch {

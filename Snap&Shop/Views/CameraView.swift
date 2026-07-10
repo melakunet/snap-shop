@@ -15,7 +15,9 @@ struct CameraView: View {
     @State private var flashOn = false
     @State private var deepPulse = false
     @State private var selectedPickerItem: PhotosPickerItem?
+    @State private var selectedVideoItem: PhotosPickerItem?
     @State private var showFileImporter = false
+    @State private var showVideoImporter = false
     @State private var showResults = false
     #if DEBUG
     @State private var isDebugScanning = false
@@ -71,6 +73,18 @@ struct CameraView: View {
                 }
             }
         }
+        .onChange(of: selectedVideoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                do {
+                    if let video = try await newItem.loadTransferable(type: VideoTransferable.self) {
+                        session.publishVideo(video.url)
+                    }
+                } catch {
+                    print("PhotosPicker video load failed: \(error)")
+                }
+            }
+        }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.image]) { result in
             switch result {
             case .success(let url):
@@ -87,16 +101,48 @@ struct CameraView: View {
                 break
             }
         }
-        // Navigate to results as soon as capturedImageData is set.
+        .fileImporter(
+            isPresented: $showVideoImporter,
+            allowedContentTypes: [.movie, .video, .mpeg4Movie, .quickTimeMovie]
+        ) { result in
+            switch result {
+            case .success(let url):
+                guard url.startAccessingSecurityScopedResource() else { return }
+                defer { url.stopAccessingSecurityScopedResource() }
+                do {
+                    let tempURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString + "." + url.pathExtension)
+                    try FileManager.default.copyItem(at: url, to: tempURL)
+                    session.publishVideo(tempURL)
+                } catch {
+                    print("Video file importer read failed: \(error)")
+                }
+            case .failure:
+                break
+            }
+        }
+        // Navigate to results as soon as capturedImageData or capturedVideoURL is set.
         .onChange(of: session.capturedImageData) { _, newData in
             if newData != nil { showResults = true }
         }
-        // Clear the captured image when the user pops back so a fresh scan is required.
+        .onChange(of: session.capturedVideoURL) { _, url in
+            if url != nil { showResults = true }
+        }
+        // Sync isScanning with actual recording state from the session.
+        .onChange(of: session.isRecording) { _, recording in
+            withAnimation(.spring(duration: 0.2)) { isScanning = recording }
+        }
+        // Clear captured image/video when the user pops back so a fresh scan is required.
         .onChange(of: showResults) { _, isShowing in
-            if !isShowing { session.capturedImageData = nil }
+            if !isShowing {
+                session.capturedImageData = nil
+                session.capturedVideoURL = nil
+            }
         }
         .navigationDestination(isPresented: $showResults) {
-            if let data = session.capturedImageData {
+            if let videoURL = session.capturedVideoURL {
+                ResultsView(scanMode: .deep, videoURL: videoURL)
+            } else if let data = session.capturedImageData {
                 ResultsView(scanMode: scanMode, imageData: data)
             }
         }
@@ -288,17 +334,32 @@ struct CameraView: View {
 
     private var shutterArea: some View {
         HStack(spacing: 0) {
-            PhotosPicker(
-                selection: $selectedPickerItem,
-                matching: .images,
-                photoLibrary: .shared()
-            ) {
-                Image(systemName: "photo.on.rectangle")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .frame(width: 44, height: 44)
-                    .background(Color.white.opacity(0.12))
-                    .clipShape(Circle())
+            if scanMode == .precision {
+                PhotosPicker(
+                    selection: $selectedPickerItem,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(width: 44, height: 44)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(Circle())
+                }
+            } else {
+                PhotosPicker(
+                    selection: $selectedVideoItem,
+                    matching: .videos,
+                    photoLibrary: .shared()
+                ) {
+                    Image(systemName: "video.badge.plus")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(width: 44, height: 44)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(Circle())
+                }
             }
 
             Spacer()
@@ -319,7 +380,11 @@ struct CameraView: View {
                     if scanMode == .precision {
                         session.capturePhoto(flashOn: flashOn)
                     } else {
-                        withAnimation(.spring(duration: 0.2)) { isScanning.toggle() }
+                        if session.isRecording {
+                            session.stopRecording()
+                        } else {
+                            session.startRecording()
+                        }
                     }
                 } label: {
                     ZStack {
@@ -346,7 +411,13 @@ struct CameraView: View {
 
             Spacer()
 
-            Button { showFileImporter = true } label: {
+            Button {
+                if scanMode == .precision {
+                    showFileImporter = true
+                } else {
+                    showVideoImporter = true
+                }
+            } label: {
                 Image(systemName: "folder")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(.white.opacity(0.8))
@@ -454,6 +525,23 @@ private struct CornerBrackets: Shape {
         pathResult.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - length))
 
         return pathResult
+    }
+}
+
+// MARK: — Video Transferable (PhotosPicker Deep mode)
+
+private struct VideoTransferable: Transferable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .movie) { video in
+            SentTransferredFile(video.url)
+        } importing: { received in
+            let dest = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString + "." + received.file.pathExtension)
+            try FileManager.default.copyItem(at: received.file, to: dest)
+            return VideoTransferable(url: dest)
+        }
     }
 }
 

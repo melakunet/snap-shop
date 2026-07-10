@@ -6,6 +6,8 @@ interface BestBuyProduct {
   regularPrice?: number
   url?: string
   thumbnailImage?: string
+  customerReviewAverage?: number
+  customerReviewCount?: number
 }
 
 interface BestBuyResponse {
@@ -18,7 +20,7 @@ export async function fetchBestBuyPrices(query: string, env: Env): Promise<ShopI
   try {
     const params = new URLSearchParams({
       apiKey: env.BESTBUY_API_KEY,
-      show: 'name,salePrice,regularPrice,url,thumbnailImage',
+      show: 'name,salePrice,regularPrice,url,thumbnailImage,customerReviewAverage,customerReviewCount',
       format: 'json',
       pageSize: '5',
     })
@@ -40,6 +42,9 @@ export async function fetchBestBuyPrices(query: string, env: Env): Promise<ShopI
         source: 'Best Buy',
         link: p.url ?? '',
         thumbnail: p.thumbnailImage ?? '',
+        ...(p.customerReviewAverage != null ? { rating: p.customerReviewAverage } : {}),
+        ...(p.customerReviewCount != null ? { review_count: p.customerReviewCount } : {}),
+        ...(p.name ? { title: p.name } : {}),
       }
     })
   } catch {

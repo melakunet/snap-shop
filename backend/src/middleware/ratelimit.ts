@@ -3,10 +3,10 @@ import type { Env, Variables } from '../lib/schema'
 import { errorBody } from '../lib/errors'
 import { captureError } from '../lib/sentry'
 
-// Daily scan quotas by tier and route family
+// Daily quotas by tier and route family
 const QUOTAS = {
-  free: { precision: 10, deep: 30 },
-  pro:  { precision: Infinity, deep: 200 },
+  free: { precision: 10, deep: 30, shop: 100, transcribe: 20, url: 15 },
+  pro:  { precision: Infinity, deep: 200, shop: Infinity, transcribe: Infinity, url: Infinity },
 } as const
 
 // In-memory fallback used when Upstash isn't configured (local dev only).
@@ -38,9 +38,12 @@ function utcDate(): string {
   return new Date().toISOString().slice(0, 10) // YYYY-MM-DD
 }
 
-function routeFamily(path: string): 'precision' | 'deep' | null {
+function routeFamily(path: string): 'precision' | 'deep' | 'shop' | 'transcribe' | 'url' | null {
   if (path.includes('/precision')) return 'precision'
   if (path.includes('/deep')) return 'deep'
+  if (path.includes('/shop')) return 'shop'
+  if (path.includes('/transcribe')) return 'transcribe'
+  if (path.includes('/url')) return 'url'
   return null
 }
 
@@ -73,7 +76,7 @@ async function redisIncr(
 export const rateLimit: MiddlewareHandler<{ Bindings: Env; Variables: Variables }> = async (c, next) => {
   const family = routeFamily(c.req.path)
 
-  // /shop and any unrecognised path: no quota consumed
+  // Unrecognised path: no quota consumed
   if (!family) return next()
 
   const userId = c.get('userId')

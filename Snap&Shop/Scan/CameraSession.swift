@@ -5,10 +5,13 @@ final class CameraSession: NSObject, ObservableObject {
     @Published var permissionGranted = false
     @Published var permissionDenied = false
     @Published var capturedImageData: Data?
+    @Published var capturedVideoURL: URL?
     @Published var isCapturing = false
+    @Published var isRecording = false
 
     let session = AVCaptureSession()
     private let photoOutput = AVCapturePhotoOutput()
+    private let movieFileOutput = AVCaptureMovieFileOutput()
     private let sessionQueue = DispatchQueue(label: "com.snapshop.camera", qos: .userInitiated)
 
     override init() {
@@ -41,7 +44,8 @@ final class CameraSession: NSObject, ObservableObject {
 
     private func configureSession() {
         session.beginConfiguration()
-        session.sessionPreset = .photo
+        // .high (1080p) supports both AVCapturePhotoOutput and AVCaptureMovieFileOutput.
+        session.sessionPreset = .high
 
         guard
             let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
@@ -53,6 +57,10 @@ final class CameraSession: NSObject, ObservableObject {
 
         if session.canAddInput(input) { session.addInput(input) }
         if session.canAddOutput(photoOutput) { session.addOutput(photoOutput) }
+        if session.canAddOutput(movieFileOutput) {
+            session.addOutput(movieFileOutput)
+            movieFileOutput.maxRecordedDuration = CMTime(seconds: 10, preferredTimescale: 600)
+        }
         session.commitConfiguration()
     }
 
@@ -65,10 +73,13 @@ final class CameraSession: NSObject, ObservableObject {
 
     func stop() {
         sessionQueue.async {
+            if self.movieFileOutput.isRecording { self.movieFileOutput.stopRecording() }
             guard self.session.isRunning else { return }
             self.session.stopRunning()
         }
     }
+
+    // MARK: — Precision capture
 
     func capturePhoto(flashOn: Bool) {
         guard !isCapturing else { return }
@@ -86,7 +97,33 @@ final class CameraSession: NSObject, ObservableObject {
     func publishImage(_ data: Data) {
         DispatchQueue.main.async { self.capturedImageData = data }
     }
+
+    // MARK: — Deep capture
+
+    func startRecording() {
+        guard !isRecording,
+              let connection = movieFileOutput.connection(with: .video) else { return }
+        // Stabilise if the device supports it
+        if connection.isVideoStabilizationSupported {
+            connection.preferredVideoStabilizationMode = .auto
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + ".mov")
+        DispatchQueue.main.async { self.isRecording = true }
+        sessionQueue.async { self.movieFileOutput.startRecording(to: url, recordingDelegate: self) }
+    }
+
+    func stopRecording() {
+        guard isRecording else { return }
+        sessionQueue.async { self.movieFileOutput.stopRecording() }
+    }
+
+    func publishVideo(_ url: URL) {
+        DispatchQueue.main.async { self.capturedVideoURL = url }
+    }
 }
+
+// MARK: — Still photo delegate
 
 extension CameraSession: AVCapturePhotoCaptureDelegate {
     nonisolated func photoOutput(
@@ -98,6 +135,24 @@ extension CameraSession: AVCapturePhotoCaptureDelegate {
         DispatchQueue.main.async {
             self.isCapturing = false
             self.capturedImageData = data
+        }
+    }
+}
+
+// MARK: — Movie file delegate
+
+extension CameraSession: AVCaptureFileOutputRecordingDelegate {
+    nonisolated func fileOutput(
+        _: AVCaptureFileOutput,
+        didFinishRecordingTo outputFileURL: URL,
+        from _: [AVCaptureConnection],
+        error: Error?
+    ) {
+        DispatchQueue.main.async {
+            self.isRecording = false
+            if error == nil {
+                self.capturedVideoURL = outputFileURL
+            }
         }
     }
 }

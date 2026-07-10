@@ -1,0 +1,26 @@
+# Copy this file to .dev.vars (gitignored) to override wrangler.toml [vars] locally.
+# .dev.vars is loaded by `wrangler dev` automatically — no flag needed.
+
+# ── Real-auth testing (DEV_AUTH_BYPASS off) ───────────────────────────────────
+#
+# 1. In Xcode, sign in with Apple on the simulator or device to get a fresh
+#    identity token. The SignInView prints the token to the console in DEBUG builds.
+#
+# 2. Set APPLE_BUNDLE_ID to match the app's bundle identifier exactly:
+#    (check Xcode → Target → General → Bundle Identifier)
+APPLE_BUNDLE_ID=com.melakunet.snapshop
+
+# 3. Leave DEV_AUTH_BYPASS unset (or set to "0") so the real JWT path is exercised.
+#    When unset, the auth middleware verifies the bearer token against Apple's JWKS.
+# DEV_AUTH_BYPASS=0
+
+# ── Dev bypass (default in wrangler.toml) ────────────────────────────────────
+# To re-enable the bypass without editing wrangler.toml:
+# DEV_AUTH_BYPASS=1
+
+# ── Required secrets (wrangler secret put <NAME> for production) ──────────────
+ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=...
+SERPAPI_KEY=...
+SENTRY_DSN=https://...@sentry.io/...
+PLAUSIBLE_DOMAIN=snapshop.app

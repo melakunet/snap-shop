@@ -1,9 +1,19 @@
 import SwiftUI
 
+private enum BulletTint { case accent, success }
+
+private struct BulletItem {
+    let icon: String
+    let text: String
+    let tint: BulletTint
+    var dividerAbove: Bool = false
+}
+
 private struct OnboardingSlide {
     let title: String
     let body: String
     let icon: String
+    var bullets: [BulletItem]? = nil
 }
 
 struct OnboardingView: View {
@@ -12,9 +22,49 @@ struct OnboardingView: View {
     @State private var currentPage = 0
 
     private let slides: [OnboardingSlide] = [
-        OnboardingSlide(title: "Snap It", body: "Point your camera at any product — no barcode needed.", icon: "camera.fill"),
-        OnboardingSlide(title: "Compare Prices", body: "See live prices from Amazon, Walmart, Best Buy, and more.", icon: "tag.fill"),
-        OnboardingSlide(title: "Save Money", body: "Track price drops on favourites and never overpay again.", icon: "star.fill")
+        OnboardingSlide(
+            title: "Snap It",
+            body: "Point your camera at any product — no barcode needed. Compare live prices from Amazon, Walmart, Best Buy, and more in seconds.",
+            icon: "camera.fill"
+        ),
+        OnboardingSlide(
+            title: "Two Ways to Scan",
+            body: "Precision captures one sharp photo for everyday items. Deep pans a video to fully identify complex or multi-sided products. Switch modes any time.",
+            icon: "camera.aperture"
+        ),
+        OnboardingSlide(
+            title: "Your Privacy",
+            body: "Here's exactly what happens with your data.",
+            icon: "lock.shield.fill",
+            bullets: [
+                BulletItem(
+                    icon: "arrow.up.circle.fill",
+                    text: "One compressed photo per Precision scan",
+                    tint: .accent
+                ),
+                BulletItem(
+                    icon: "arrow.up.circle.fill",
+                    text: "Up to 8 keyframes per Deep scan — nothing else",
+                    tint: .accent
+                ),
+                BulletItem(
+                    icon: "checkmark.circle.fill",
+                    text: "Your photo library — never accessed",
+                    tint: .success,
+                    dividerAbove: true
+                ),
+                BulletItem(
+                    icon: "checkmark.circle.fill",
+                    text: "Location & contacts — never collected",
+                    tint: .success
+                ),
+                BulletItem(
+                    icon: "checkmark.circle.fill",
+                    text: "Your data is never sold",
+                    tint: .success
+                ),
+            ]
+        ),
     ]
 
     var body: some View {
@@ -48,6 +98,8 @@ struct OnboardingView: View {
         }
     }
 
+    // MARK: — Slide layout
+
     private func slideView(_ slide: OnboardingSlide) -> some View {
         VStack(spacing: Spacing.xl) {
             Spacer()
@@ -56,14 +108,51 @@ struct OnboardingView: View {
                 Text(slide.title)
                     .font(Typography.title)
                     .foregroundStyle(Color.Brand.textPrimary)
-                Text(slide.body)
-                    .font(Typography.body)
-                    .foregroundStyle(Color.Brand.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, Spacing.xl)
+                if let bullets = slide.bullets {
+                    Text(slide.body)
+                        .font(Typography.callout)
+                        .foregroundStyle(Color.Brand.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, Spacing.xl)
+                    bulletList(bullets)
+                        .padding(.top, Spacing.xs)
+                } else {
+                    Text(slide.body)
+                        .font(Typography.body)
+                        .foregroundStyle(Color.Brand.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, Spacing.xl)
+                }
             }
             Spacer()
         }
+    }
+
+    private func bulletList(_ items: [BulletItem]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(items.indices, id: \.self) { i in
+                let item = items[i]
+                if item.dividerAbove {
+                    Divider()
+                        .background(Color.Brand.border)
+                        .padding(.vertical, Spacing.sm)
+                }
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: item.icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(
+                            item.tint == .accent ? Color.Brand.accent : Color.Brand.success
+                        )
+                        .frame(width: 20)
+                    Text(item.text)
+                        .font(Typography.caption)
+                        .foregroundStyle(Color.Brand.textSecondary)
+                    Spacer()
+                }
+                .padding(.vertical, Spacing.xs)
+            }
+        }
+        .padding(.horizontal, Spacing.xl)
     }
 
     private func iconCard(_ icon: String) -> some View {
@@ -91,6 +180,8 @@ struct OnboardingView: View {
         }
     }
 
+    // MARK: — Page indicator
+
     private var pageIndicator: some View {
         HStack(spacing: Spacing.sm) {
             ForEach(slides.indices, id: \.self) { index in
@@ -101,6 +192,8 @@ struct OnboardingView: View {
             }
         }
     }
+
+    // MARK: — Action buttons
 
     private var actionButtons: some View {
         VStack(spacing: Spacing.md) {

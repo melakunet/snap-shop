@@ -9,6 +9,9 @@ import { spec, swaggerUiHtml } from './lib/openapi'
 import precisionRoute from './routes/identify-precision'
 import deepRoute from './routes/identify-deep'
 import shopRoute from './routes/shop'
+import productReviewsRoute from './routes/product-reviews'
+import transcribeRoute from './routes/transcribe'
+import urlRoute from './routes/identify-url'
 
 // TODO (Phase 4): expose /identify and /shop as MCP tools for agentic-commerce
 // interop using the Model Context Protocol server SDK.
@@ -33,10 +36,18 @@ app.post('/debug/boom', (c) => {
 app.use('/identify/*', auth)
 app.use('/identify/*', rateLimit)
 app.use('/shop', auth)
+app.use('/shop', rateLimit)
+app.use('/product/*', auth)
+app.use('/product/*', rateLimit)
+app.use('/transcribe', auth)
+app.use('/transcribe', rateLimit)
 
 app.route('/identify/precision', precisionRoute)
 app.route('/identify/deep', deepRoute)
 app.route('/shop', shopRoute)
+app.route('/product/reviews', productReviewsRoute)
+app.route('/transcribe', transcribeRoute)
+app.route('/identify/url', urlRoute)
 
 // Global error handler — catches any unhandled throws
 app.onError(async (err, c) => {
