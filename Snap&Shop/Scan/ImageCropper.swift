@@ -6,9 +6,9 @@ import Vision
 /// attention-saliency crop → 1024 px longest-edge downscale → JPEG quality-step to < 100 KB.
 enum ImageCropper {
 
-    static let uploadMaxBytes = 100_000
-    private static let uploadMaxDimension = 1024
-    private static let qualitySteps: [Double] = [0.8, 0.65, 0.5, 0.35, 0.2, 0.1]
+    nonisolated static let uploadMaxBytes = 100_000
+    nonisolated private static let uploadMaxDimension = 1024
+    nonisolated private static let qualitySteps: [Double] = [0.8, 0.65, 0.5, 0.35, 0.2, 0.1]
 
     // MARK: — Public API
 
@@ -36,7 +36,7 @@ enum ImageCropper {
 
     /// Re-compress a JPEG only when it exceeds `maxBytes`; otherwise return it unchanged.
     /// Safe to call from any thread or actor (uses CoreGraphics only).
-    static func cap(jpeg: Data, maxBytes: Int = uploadMaxBytes) -> Data {
+    nonisolated static func cap(jpeg: Data, maxBytes: Int = uploadMaxBytes) -> Data {
         guard jpeg.count > maxBytes,
               let cgImage = decodeCGImage(from: jpeg) else { return jpeg }
         return compress(cgImage, maxBytes: maxBytes)
@@ -44,7 +44,7 @@ enum ImageCropper {
 
     /// Step JPEG quality from 0.8 → 0.1 and return the first encoding that fits within `maxBytes`.
     /// Falls back to quality 0.1 if no step satisfies the cap.
-    static func compress(_ cgImage: CGImage, maxBytes: Int) -> Data {
+    nonisolated static func compress(_ cgImage: CGImage, maxBytes: Int) -> Data {
         for quality in qualitySteps {
             if let data = jpegData(from: cgImage, quality: quality), data.count <= maxBytes {
                 return data
@@ -101,13 +101,13 @@ enum ImageCropper {
 
     // MARK: — Private
 
-    private static func decodeCGImage(from data: Data) -> CGImage? {
+    nonisolated private static func decodeCGImage(from data: Data) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
     /// Attention-saliency crop with 20 % padding. Returns nil when no salient region is found.
-    private static func saliencyCrop(_ cgImage: CGImage) -> CGImage? {
+    nonisolated private static func saliencyCrop(_ cgImage: CGImage) -> CGImage? {
         guard let norm = saliencyNormalizedRect(for: cgImage) else { return nil }
         let pw = CGFloat(cgImage.width), ph = CGFloat(cgImage.height)
         let pixelRect = CGRect(x: norm.minX * pw, y: norm.minY * ph,
@@ -117,7 +117,7 @@ enum ImageCropper {
     }
 
     /// Normalized saliency bounding rect (top-left origin). Shared by saliencyCrop and saliencyRect.
-    private static func saliencyNormalizedRect(for cgImage: CGImage) -> CGRect? {
+    nonisolated private static func saliencyNormalizedRect(for cgImage: CGImage) -> CGRect? {
         let request = VNGenerateAttentionBasedSaliencyImageRequest()
         try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
 
@@ -138,7 +138,7 @@ enum ImageCropper {
     }
 
     /// Center-80 % crop used as fallback when saliency returns no region.
-    private static func centerCrop(_ cgImage: CGImage) -> CGImage {
+    nonisolated private static func centerCrop(_ cgImage: CGImage) -> CGImage {
         let pw = CGFloat(cgImage.width), ph = CGFloat(cgImage.height)
         let w = pw * 0.8, h = ph * 0.8
         let rect = CGRect(x: (pw - w) / 2, y: (ph - h) / 2, width: w, height: h)
@@ -146,7 +146,7 @@ enum ImageCropper {
     }
 
     /// Downscale so the longest pixel edge ≤ `maxDimension`. No-op if already within bounds.
-    private static func downscale(_ cgImage: CGImage, maxDimension: Int) -> CGImage {
+    nonisolated private static func downscale(_ cgImage: CGImage, maxDimension: Int) -> CGImage {
         let pw = cgImage.width, ph = cgImage.height
         guard max(pw, ph) > maxDimension else { return cgImage }
         let scale = Double(maxDimension) / Double(max(pw, ph))
@@ -164,7 +164,7 @@ enum ImageCropper {
         return ctx.makeImage() ?? cgImage
     }
 
-    private static func jpegData(from cgImage: CGImage, quality: Double) -> Data? {
+    nonisolated private static func jpegData(from cgImage: CGImage, quality: Double) -> Data? {
         let buf = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(
             buf, "public.jpeg" as CFString, 1, nil

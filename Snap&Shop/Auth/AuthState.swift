@@ -14,7 +14,10 @@ final class AuthState: ObservableObject {
     @Published private(set) var identityToken: String?
     @Published private(set) var displayName: String?
 
-    var isSignedIn: Bool { userId != nil && identityToken != nil }
+    // Set by signInAsDemo() — never persisted; cleared on signOut().
+    private var isDemoMode = false
+
+    var isSignedIn: Bool { userId != nil && (identityToken != nil || isDemoMode) }
 
     // MARK: — Keychain keys
 
@@ -50,18 +53,30 @@ final class AuthState: ObservableObject {
         userId        = nil
         identityToken = nil
         displayName   = nil
+        isDemoMode    = false
 
         KeychainStore.delete(key: Keys.userId)
         KeychainStore.delete(key: Keys.identityToken)
         KeychainStore.delete(key: Keys.displayName)
     }
 
+#if DEBUG
+    /// Bypasses Sign in with Apple for demo/personal-team builds.
+    /// In-memory only — no Keychain writes, no Authorization header sent.
+    func signInAsDemo() {
+        isDemoMode    = true
+        userId        = "demo-user"
+        identityToken = nil
+        displayName   = "Demo"
+    }
+#endif
+
     // MARK: — Revocation check
 
     /// Called on every cold launch. Signs out if Apple has revoked the credential
     /// (user removed the app from their Apple ID settings).
     func checkRevocation() async {
-        guard let userId else { return }
+        guard !isDemoMode, let userId else { return }
         let state = await withCheckedContinuation { (cont: CheckedContinuation<ASAuthorizationAppleIDProvider.CredentialState, Never>) in
             ASAuthorizationAppleIDProvider().getCredentialState(forUserID: userId) { state, _ in
                 cont.resume(returning: state)

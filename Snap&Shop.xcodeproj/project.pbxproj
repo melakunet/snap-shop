@@ -410,12 +410,14 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = LGHH7X2AJP;
+				DEVELOPMENT_TEAM = TN2299H44T;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Snap-Shop-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Snap & Shop uses the camera to identify products you point it at, so you can compare prices and reviews instantly.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Snap&Shop uses the microphone when recording video in Deep Scan mode and for voice hints to describe what you're looking for.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Snap&Shop transcribes your voice hints on-device to help identify products. For video scans, audio may be sent to a cloud service if on-device recognition is unavailable.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -427,7 +429,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.melakunet.snapshop;
+				PRODUCT_BUNDLE_IDENTIFIER = com.melakunet.snapshop.demo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -446,12 +448,14 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = LGHH7X2AJP;
+				DEVELOPMENT_TEAM = TN2299H44T;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Snap-Shop-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Snap & Shop uses the camera to identify products you point it at, so you can compare prices and reviews instantly.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Snap&Shop uses the microphone when recording video in Deep Scan mode and for voice hints to describe what you're looking for.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Snap&Shop transcribes your voice hints on-device to help identify products. For video scans, audio may be sent to a cloud service if on-device recognition is unavailable.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -463,7 +467,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.melakunet.snapshop;
+				PRODUCT_BUNDLE_IDENTIFIER = com.melakunet.snapshop.demo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;

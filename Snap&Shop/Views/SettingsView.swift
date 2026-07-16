@@ -18,6 +18,9 @@ struct SettingsView: View {
                 notificationsSection
                 privacySection
                 accountSection
+                #if DEBUG
+                debugSection
+                #endif
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
@@ -185,6 +188,25 @@ struct SettingsView: View {
         .listRowBackground(Color.Brand.surface)
         .listRowSeparatorTint(Color.Brand.border)
     }
+
+    #if DEBUG
+    private var debugSection: some View {
+        Section {
+            Button {
+                authState.signOut()
+                hasOnboarded = false
+            } label: {
+                Label("Reset onboarding", systemImage: "arrow.counterclockwise")
+                    .font(Typography.body)
+                    .foregroundStyle(Color.Brand.error)
+            }
+        } header: {
+            sectionHeader("Debug")
+        }
+        .listRowBackground(Color.Brand.surface)
+        .listRowSeparatorTint(Color.Brand.border)
+    }
+    #endif
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)

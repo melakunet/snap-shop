@@ -4,14 +4,8 @@
 <dict>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- Covers localhost and .local for Simulator runs -->
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
-		<!-- DEV ONLY: allows plain HTTP to the LAN IP used by wrangler dev on the Mac.
-		     Real devices on the same Wi-Fi network need this because NSAllowsLocalNetworking
-		     does NOT cover numeric RFC-1918 addresses (192.168.x.x).
-		     REMOVE this entire NSExceptionDomains block before production / App Store submission
-		     and switch AppConfig.backendBaseURL to the production HTTPS URL. -->
 		<key>NSExceptionDomains</key>
 		<dict>
 			<key>192.168.2.12</key>
@@ -21,9 +15,5 @@
 			</dict>
 		</dict>
 	</dict>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Snap&amp;Shop uses the microphone when recording video in Deep Scan mode and for voice hints to describe what you're looking for.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Snap&amp;Shop transcribes your voice hints on-device to help identify products. For video scans, audio may be sent to a cloud service if on-device recognition is unavailable.</string>
 </dict>
 </plist>

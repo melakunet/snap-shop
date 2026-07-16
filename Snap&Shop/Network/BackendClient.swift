@@ -40,7 +40,8 @@ enum BackendClient {
     /// Injected at app startup; returns the current Apple identity token or nil (signed out).
     /// Reading it on every request means sign-out takes effect immediately without
     /// restarting any in-flight sessions.
-    static var tokenProvider: (() -> String?)? = nil
+    /// nonisolated(unsafe): set once at startup, read-only after that — no actor protection needed.
+    nonisolated(unsafe) static var tokenProvider: (() -> String?)? = nil
 
     /// Builds a URLRequest pre-loaded with the HTTP method and, when signed in,
     /// the Authorization: Bearer header. All public methods use this instead of
@@ -249,26 +250,13 @@ enum BackendClient {
         let asset = AVURLAsset(url: videoURL)
         let outputURL = FileManager.default.temporaryDirectory
             .appending(path: "\(UUID().uuidString).m4a")
-
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
             throw BackendError.httpError(0, "Could not create AVAssetExportSession")
         }
-        session.outputURL = outputURL
-        session.outputFileType = .m4a
-
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            session.exportAsynchronously {
-                switch session.status {
-                case .completed:
-                    continuation.resume()
-                default:
-                    continuation.resume(throwing: BackendError.httpError(
-                        0,
-                        session.error?.localizedDescription ?? "Audio export failed"
-                    ))
-                }
-            }
-        }
+        // export(to:as:isolation:) is @backDeployed — no #available guard needed.
+        // It replaces the deprecated exportAsynchronously/status/error trio and avoids
+        // capturing the non-Sendable session across a closure boundary.
+        try await session.export(to: outputURL, as: .m4a)
         return outputURL
     }
 

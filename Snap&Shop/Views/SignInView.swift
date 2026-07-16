@@ -46,6 +46,24 @@ struct SignInView: View {
                     .padding(.horizontal, Spacing.xl)
                     .accessibilityIdentifier("signInWithAppleButton")
 
+                    #if DEBUG
+                    Button {
+                        authState.signInAsDemo()
+                    } label: {
+                        Text("Continue in demo mode")
+                            .font(Typography.body)
+                            .foregroundStyle(Color.Brand.textSecondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Radius.md)
+                                    .stroke(Color.Brand.textSecondary.opacity(0.4), lineWidth: 1)
+                            )
+                    }
+                    .padding(.horizontal, Spacing.xl)
+                    .accessibilityIdentifier("demoModeButton")
+                    #endif
+
                     if let error = errorMessage {
                         Text(error)
                             .font(Typography.caption)
