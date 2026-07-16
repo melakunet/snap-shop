@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @AppStorage("selectedTab") private var selectedTab: Tab = .scan
-    @AppStorage("hasOnboarded") private var hasOnboarded = false
+    @State private var hasOnboarded = false
     @EnvironmentObject private var authState: AuthState
 
     var body: some View {
