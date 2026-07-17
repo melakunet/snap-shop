@@ -47,6 +47,9 @@ enum BackendClient {
     /// the Authorization: Bearer header. All public methods use this instead of
     /// constructing URLRequest directly.
     private static func makeRequest(url: URL, method: String = "GET") -> URLRequest {
+        #if DEBUG
+        print("[BackendClient] → \(method) \(url.absoluteString)")
+        #endif
         var request = URLRequest(url: url)
         request.httpMethod = method
         if let token = tokenProvider?() {
