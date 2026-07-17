@@ -74,6 +74,16 @@ final class SpeechTranscriber: ObservableObject {
         phase = .processingFile
         partialTranscript = ""
 
+        // Both SFSpeechURLRecognitionRequest and AVAssetExportSession raise an
+        // uncatchable NSException when the asset has zero audio tracks. Check once
+        // here before either path runs; skip transcription silently if no track found.
+        let asset = AVURLAsset(url: url)
+        guard let audioTracks = try? await asset.loadTracks(withMediaType: .audio),
+              !audioTracks.isEmpty else {
+            phase = .idle
+            return
+        }
+
         if let text = await transcribeFileOnDevice(url: url), !text.isEmpty {
             partialTranscript = text
             phase = .done(text)

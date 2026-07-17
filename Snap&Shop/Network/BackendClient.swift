@@ -17,11 +17,13 @@ enum BackendError: Error, LocalizedError {
 enum DeepScanError: Error, LocalizedError {
     case zeroDuration
     case noFrames
+    case noAudioTrack
 
     var errorDescription: String? {
         switch self {
-        case .zeroDuration: "The video has no duration."
-        case .noFrames: "Could not extract frames from the video."
+        case .zeroDuration:   "The video has no duration."
+        case .noFrames:       "Could not extract frames from the video."
+        case .noAudioTrack:   "The video has no audio track."
         }
     }
 }
@@ -251,14 +253,20 @@ enum BackendClient {
 
     private static func extractAudioFromVideo(_ videoURL: URL) async throws -> URL {
         let asset = AVURLAsset(url: videoURL)
+
+        // AVAssetExportPresetAppleM4A raises an uncatchable NSException
+        // ("-[AVAssetReaderAudioMixOutput initWithAudioTracks:audioSettings:] invalid parameter")
+        // when the asset has zero audio tracks. Guard here so Swift's error path handles it.
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        guard !audioTracks.isEmpty else {
+            throw DeepScanError.noAudioTrack
+        }
+
         let outputURL = FileManager.default.temporaryDirectory
             .appending(path: "\(UUID().uuidString).m4a")
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
             throw BackendError.httpError(0, "Could not create AVAssetExportSession")
         }
-        // export(to:as:isolation:) is @backDeployed — no #available guard needed.
-        // It replaces the deprecated exportAsynchronously/status/error trio and avoids
-        // capturing the non-Sendable session across a closure boundary.
         try await session.export(to: outputURL, as: .m4a)
         return outputURL
     }

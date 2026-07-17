@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 import AVFoundation
 import PhotosUI
@@ -31,6 +32,9 @@ struct CameraView: View {
     @State private var prefillQuery = ""
     @State private var showCropSheet = false
     @State private var pendingUploadData: Data? = nil
+    @State private var transcriptVideoPlayer: AVPlayer? = nil
+    @State private var frameFromVideo: Data? = nil
+    @State private var showVideoFrameCrop = false
     #if DEBUG
     @State private var isDebugScanning = false
     @State private var debugTask: Task<Void, Never>?
@@ -45,6 +49,33 @@ struct CameraView: View {
             .sheet(isPresented: $showTranscriptSheet) { transcriptSheet }
             .onChange(of: transcriber.partialTranscript) { _, partial in handlePartialTranscript(partial) }
             .onChange(of: transcriber.phase) { _, phase in handlePhaseChange(phase) }
+            .onChange(of: showTranscriptSheet) { _, showing in
+                if showing, let url = session.capturedVideoURL {
+                    transcriptVideoPlayer = AVPlayer(url: url)
+                    transcriptVideoPlayer?.play()
+                } else {
+                    transcriptVideoPlayer?.pause()
+                    transcriptVideoPlayer = nil
+                }
+            }
+            .fullScreenCover(isPresented: $showVideoFrameCrop, onDismiss: {
+                if !showResults { frameFromVideo = nil }
+            }) {
+                if let data = frameFromVideo {
+                    CropSheet(
+                        imageData: data,
+                        onConfirm: { uploadData in
+                            pendingUploadData = uploadData
+                            showVideoFrameCrop = false
+                            showResults = true
+                        },
+                        onCancel: {
+                            showVideoFrameCrop = false
+                            frameFromVideo = nil
+                        }
+                    )
+                }
+            }
             .fullScreenCover(isPresented: $showCropSheet, onDismiss: {
                 // Swipe-to-dismiss is disabled (fullScreenCover), but if dismissed via Cancel
                 // the handler already clears capturedImageData. This is a safety net.
@@ -66,7 +97,9 @@ struct CameraView: View {
                 }
             }
             .navigationDestination(isPresented: $showResults) {
-                if let videoURL = session.capturedVideoURL {
+                if let frameData = frameFromVideo {
+                    ResultsView(scanMode: .precision, imageData: frameData, uploadData: pendingUploadData)
+                } else if let videoURL = session.capturedVideoURL {
                     ResultsView(scanMode: .deep, videoURL: videoURL, hint: voiceHint)
                 } else if let data = session.capturedImageData {
                     ResultsView(scanMode: scanMode, imageData: data, uploadData: pendingUploadData)
@@ -197,6 +230,7 @@ struct CameraView: View {
                 voiceHint = ""
                 pastedURL = nil
                 pendingUploadData = nil
+                frameFromVideo = nil
                 if !prefillQuery.isEmpty {
                     searchQuery = prefillQuery
                     prefillQuery = ""
@@ -620,26 +654,59 @@ struct CameraView: View {
                             .foregroundStyle(Color.Brand.textSecondary)
                     }
                 } else {
-                    VStack(alignment: .leading, spacing: Spacing.lg) {
-                        Text("Add a hint (optional)")
-                            .font(Typography.headline)
-                            .foregroundStyle(Color.Brand.textPrimary)
-                            .padding(.horizontal, Spacing.xl)
-                        TextEditor(text: $voiceHint)
-                            .font(Typography.body)
-                            .foregroundStyle(Color.Brand.textPrimary)
-                            .frame(minHeight: 120)
-                            .padding(Spacing.md)
-                            .background(Color.Brand.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: Radius.md))
-                            .padding(.horizontal, Spacing.xl)
-                        Text("Edit or add a description to help identify the product.")
-                            .font(Typography.caption)
-                            .foregroundStyle(Color.Brand.textSecondary)
-                            .padding(.horizontal, Spacing.xl)
-                        Spacer()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Spacing.lg) {
+                            if let player = transcriptVideoPlayer {
+                                VStack(alignment: .leading, spacing: Spacing.sm) {
+                                    VideoPlayer(player: player)
+                                        .frame(height: 200)
+                                        .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                                    Button {
+                                        let time = player.currentTime()
+                                        player.pause()
+                                        showTranscriptSheet = false
+                                        Task { await extractFrameAndCrop(at: time) }
+                                    } label: {
+                                        Label("Scan this frame", systemImage: "camera.viewfinder")
+                                            .font(Typography.callout.weight(.semibold))
+                                            .foregroundStyle(Color.Brand.accentOn)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, Spacing.sm)
+                                            .background(Color.Brand.accent)
+                                            .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                                    }
+                                }
+                                .padding(.horizontal, Spacing.xl)
+                                HStack {
+                                    VStack { Divider() }
+                                    Text("or add a hint for whole-video scan")
+                                        .font(Typography.caption)
+                                        .foregroundStyle(Color.Brand.textSecondary)
+                                        .fixedSize()
+                                    VStack { Divider() }
+                                }
+                                .padding(.horizontal, Spacing.xl)
+                            }
+                            Text("Add a hint (optional)")
+                                .font(Typography.headline)
+                                .foregroundStyle(Color.Brand.textPrimary)
+                                .padding(.horizontal, Spacing.xl)
+                            TextEditor(text: $voiceHint)
+                                .font(Typography.body)
+                                .foregroundStyle(Color.Brand.textPrimary)
+                                .frame(minHeight: 120)
+                                .padding(Spacing.md)
+                                .background(Color.Brand.surface)
+                                .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                                .padding(.horizontal, Spacing.xl)
+                            Text("Edit or add a description to help identify the product.")
+                                .font(Typography.caption)
+                                .foregroundStyle(Color.Brand.textSecondary)
+                                .padding(.horizontal, Spacing.xl)
+                        }
+                        .padding(.top, Spacing.xl)
+                        .padding(.bottom, Spacing.xl)
                     }
-                    .padding(.top, Spacing.xl)
                 }
             }
             .navigationTitle("Voice Hint")
@@ -664,6 +731,21 @@ struct CameraView: View {
                 }
             }
         }
+    }
+
+    // MARK: — Frame extraction
+
+    private func extractFrameAndCrop(at time: CMTime) async {
+        guard let url = session.capturedVideoURL else { return }
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        generator.maximumSize = CGSize(width: 1024, height: 1024)
+        guard let (cgImage, _) = try? await generator.image(at: time) else { return }
+        frameFromVideo = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.9)
+        showVideoFrameCrop = true
     }
 
     // MARK: — Debug (compiled out in Release builds)

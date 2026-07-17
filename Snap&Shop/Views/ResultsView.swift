@@ -51,6 +51,14 @@ struct ResultsView: View {
     @State private var isSaved = false
     @State private var fetchID = 0
     @State private var sortMode: SortMode = .price
+    @State private var isPlaying = true
+    @State private var playerCurrentTime: Double = 0
+    @State private var playerDuration: Double = 1
+    @State private var timeObserverToken: Any? = nil
+    @State private var showFrameCropSheet = false
+    @State private var frameImageData: Data? = nil
+    @State private var showFrameResults = false
+    @State private var frameScanUploadData: Data? = nil
 
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
@@ -159,8 +167,38 @@ struct ResultsView: View {
             phase = .loading
             fetchID += 1
         }
-        .onAppear { videoPlayer?.play() }
-        .onDisappear { videoPlayer?.pause() }
+        .onAppear {
+            videoPlayer?.play()
+            isPlaying = true
+            setupTimeObserver()
+        }
+        .onDisappear {
+            videoPlayer?.pause()
+            teardownTimeObserver()
+        }
+        .fullScreenCover(isPresented: $showFrameCropSheet, onDismiss: {
+            if !showFrameResults { frameImageData = nil }
+        }) {
+            if let data = frameImageData {
+                CropSheet(
+                    imageData: data,
+                    onConfirm: { uploadData in
+                        frameScanUploadData = uploadData
+                        showFrameCropSheet = false
+                        showFrameResults = true
+                    },
+                    onCancel: {
+                        showFrameCropSheet = false
+                        frameImageData = nil
+                    }
+                )
+            }
+        }
+        .navigationDestination(isPresented: $showFrameResults) {
+            if let data = frameImageData {
+                ResultsView(scanMode: .precision, imageData: data, uploadData: frameScanUploadData)
+            }
+        }
     }
 
     @ViewBuilder
@@ -291,9 +329,7 @@ struct ResultsView: View {
     private var productHeader: some View {
         if let player = videoPlayer {
             VStack(alignment: .leading, spacing: Spacing.md) {
-                VideoPlayer(player: player)
-                    .frame(height: 200)
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                videoPlayerSection(player: player)
                 productInfo
             }
         } else if let query = textQuery {
@@ -538,9 +574,7 @@ struct ResultsView: View {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 if let player = videoPlayer {
                     VStack(alignment: .leading, spacing: Spacing.md) {
-                        VideoPlayer(player: player)
-                            .frame(height: 200)
-                            .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                        videoPlayerSection(player: player)
                         ShimmerRect(height: 18).frame(width: 200)
                     }
                     .padding(.horizontal, Spacing.xl)
@@ -687,6 +721,41 @@ struct ResultsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(Spacing.xxl)
+        } else if let player = videoPlayer {
+            ScrollView {
+                VStack(spacing: Spacing.xl) {
+                    videoPlayerSection(player: player)
+                        .padding(.horizontal, Spacing.xl)
+                    VStack(spacing: Spacing.xl) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.system(size: 52))
+                            .foregroundStyle(Color.Brand.error)
+                        VStack(spacing: Spacing.sm) {
+                            Text("Couldn't load prices")
+                                .font(Typography.headline)
+                                .foregroundStyle(Color.Brand.textPrimary)
+                            Text(message)
+                                .font(Typography.body)
+                                .foregroundStyle(Color.Brand.textSecondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        Button("Try Again") {
+                            phase = .loading
+                            fetchID += 1
+                        }
+                        .font(Typography.callout.weight(.semibold))
+                        .foregroundStyle(Color.Brand.accentOn)
+                        .padding(.horizontal, Spacing.xxl)
+                        .padding(.vertical, Spacing.md)
+                        .background(Color.Brand.accent)
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, Spacing.xl)
+                }
+                .padding(.top, Spacing.xl)
+                .padding(.bottom, Spacing.xxxl)
+            }
         } else {
             centeredState(
                 CenteredStateConfig(
@@ -731,6 +800,105 @@ struct ResultsView: View {
         .padding(Spacing.xxl)
     }
 
+    // MARK: — Video player with controls
+
+    private func videoPlayerSection(player: AVPlayer) -> some View {
+        VStack(spacing: Spacing.sm) {
+            PlayerLayerView(player: player)
+                .frame(height: 200)
+                .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+
+            HStack(spacing: Spacing.sm) {
+                Button {
+                    if isPlaying { player.pause() } else { player.play() }
+                    isPlaying.toggle()
+                } label: {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Color.Brand.textPrimary)
+                        .frame(width: 28, height: 28)
+                }
+
+                Text(formatTime(playerCurrentTime))
+                    .font(Typography.caption.monospacedDigit())
+                    .foregroundStyle(Color.Brand.textSecondary)
+                    .frame(width: 34, alignment: .leading)
+
+                Slider(
+                    value: Binding(
+                        get: { playerCurrentTime },
+                        set: { v in
+                            playerCurrentTime = v
+                            player.seek(
+                                to: CMTime(seconds: v, preferredTimescale: 600),
+                                toleranceBefore: .zero,
+                                toleranceAfter: .zero
+                            )
+                        }
+                    ),
+                    in: 0...max(playerDuration, 1)
+                )
+                .tint(Color.Brand.scanDeep)
+
+                Text(formatTime(playerDuration))
+                    .font(Typography.caption.monospacedDigit())
+                    .foregroundStyle(Color.Brand.textSecondary)
+                    .frame(width: 34, alignment: .trailing)
+            }
+
+            Button {
+                player.pause()
+                isPlaying = false
+                Task { await scanCurrentFrame() }
+            } label: {
+                Label("Scan this frame", systemImage: "camera.viewfinder")
+                    .font(Typography.callout.weight(.semibold))
+                    .foregroundStyle(Color.Brand.accentOn)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Spacing.sm)
+                    .background(Color.Brand.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+            }
+        }
+    }
+
+    private func setupTimeObserver() {
+        guard let player = videoPlayer, timeObserverToken == nil else { return }
+        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+        timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak player] time in
+            playerCurrentTime = time.seconds
+            if let duration = player?.currentItem?.duration, duration.isNumeric {
+                playerDuration = max(duration.seconds, 1)
+            }
+        }
+    }
+
+    private func teardownTimeObserver() {
+        guard let token = timeObserverToken else { return }
+        videoPlayer?.removeTimeObserver(token)
+        timeObserverToken = nil
+    }
+
+    private func scanCurrentFrame() async {
+        guard let url = videoURL else { return }
+        let time = videoPlayer?.currentTime() ?? .zero
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        generator.maximumSize = CGSize(width: 1024, height: 1024)
+        guard let (cgImage, _) = try? await generator.image(at: time) else { return }
+        frameImageData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.9)
+        showFrameCropSheet = true
+    }
+
+    private func formatTime(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let s = Int(seconds)
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
     // MARK: — Toolbar
 
     private var saveButton: some ToolbarContent {
@@ -743,6 +911,37 @@ struct ResultsView: View {
                     .symbolEffect(.bounce, value: isSaved)
             }
         }
+    }
+}
+
+// MARK: — AVPlayer layer wrapper (no native transport controls)
+
+private struct PlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerUIView {
+        PlayerUIView(player: player)
+    }
+
+    func updateUIView(_ uiView: PlayerUIView, context: Context) {}
+}
+
+private final class PlayerUIView: UIView {
+    private let playerLayer = AVPlayerLayer()
+
+    init(player: AVPlayer) {
+        super.init(frame: .zero)
+        backgroundColor = .black
+        playerLayer.player = player
+        playerLayer.videoGravity = .resizeAspect
+        layer.addSublayer(playerLayer)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        playerLayer.frame = bounds
     }
 }
 
