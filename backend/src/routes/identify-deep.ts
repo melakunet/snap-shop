@@ -60,8 +60,25 @@ route.post('/', async (c) => {
   const hint = typeof hintField === 'string' && hintField.length > 0 ? hintField : undefined
 
   try {
-    const result = await identifyWithGemini(frames, hint, c.env)
-    return c.json(result)
+    const items = await identifyWithGemini(frames, hint, c.env)
+
+    if (items.length === 0) {
+      return c.json(
+        errorBody('no_products_found', "Couldn't spot a product — try getting closer or use Scan this frame"),
+        422,
+      )
+    }
+
+    // Pick highest-confidence item and return as IdentifyResult (without frame_index)
+    const best = items.reduce((a, b) => (a.confidence >= b.confidence ? a : b))
+    return c.json({
+      brand: best.brand,
+      model: best.model,
+      category: best.category,
+      distinguishing_features: best.distinguishing_features,
+      confidence: best.confidence,
+      search_query: best.search_query,
+    })
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err))
     await captureError(c.env.SENTRY_DSN, {

@@ -79,6 +79,10 @@ async function callAPI(opts: CallOptions): Promise<string> {
 
   if (!res.ok) {
     const body = await res.text()
+    const safeUrl = url.replace(/key=[^&]+/, 'key=REDACTED')
+    console.error(
+      `[gemini] upstream error — model:${opts.model} status:${res.status} url:${safeUrl} body:${body.slice(0, 500)}`,
+    )
     throw new Error(`Gemini ${res.status}: ${body.slice(0, 300)}`)
   }
 

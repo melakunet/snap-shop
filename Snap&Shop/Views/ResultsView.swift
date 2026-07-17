@@ -55,7 +55,7 @@ struct ResultsView: View {
     @State private var playerCurrentTime: Double = 0
     @State private var playerDuration: Double = 1
     @State private var timeObserverToken: Any? = nil
-    @State private var showFrameCropSheet = false
+    @State private var pausedFrameData: Data? = nil
     @State private var frameImageData: Data? = nil
     @State private var showFrameResults = false
     @State private var frameScanUploadData: Data? = nil
@@ -176,22 +176,10 @@ struct ResultsView: View {
             videoPlayer?.pause()
             teardownTimeObserver()
         }
-        .fullScreenCover(isPresented: $showFrameCropSheet, onDismiss: {
-            if !showFrameResults { frameImageData = nil }
-        }) {
-            if let data = frameImageData {
-                CropSheet(
-                    imageData: data,
-                    onConfirm: { uploadData in
-                        frameScanUploadData = uploadData
-                        showFrameCropSheet = false
-                        showFrameResults = true
-                    },
-                    onCancel: {
-                        showFrameCropSheet = false
-                        frameImageData = nil
-                    }
-                )
+        .onChange(of: showFrameResults) { _, showing in
+            if !showing {
+                frameImageData = nil
+                frameScanUploadData = nil
             }
         }
         .navigationDestination(isPresented: $showFrameResults) {
@@ -804,14 +792,35 @@ struct ResultsView: View {
 
     private func videoPlayerSection(player: AVPlayer) -> some View {
         VStack(spacing: Spacing.sm) {
-            PlayerLayerView(player: player)
-                .frame(height: 200)
-                .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+            ZStack {
+                PlayerLayerView(player: player)
+
+                if !isPlaying, let frameData = pausedFrameData {
+                    let vidSize = player.currentItem?.presentationSize ?? CGSize(width: 16, height: 9)
+                    InlineVideoCropOverlay(
+                        frameData: frameData,
+                        videoSize: vidSize,
+                        onConfirm: { cropRect in
+                            Task { await scanFrame(imageData: frameData, cropRect: cropRect) }
+                        }
+                    )
+                }
+            }
+            .frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: Radius.md))
 
             HStack(spacing: Spacing.sm) {
                 Button {
-                    if isPlaying { player.pause() } else { player.play() }
-                    isPlaying.toggle()
+                    if isPlaying {
+                        player.pause()
+                        isPlaying = false
+                        let time = player.currentTime()
+                        Task { await captureFrame(at: time) }
+                    } else {
+                        player.play()
+                        isPlaying = true
+                        pausedFrameData = nil
+                    }
                 } label: {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 15, weight: .medium))
@@ -845,20 +854,6 @@ struct ResultsView: View {
                     .foregroundStyle(Color.Brand.textSecondary)
                     .frame(width: 34, alignment: .trailing)
             }
-
-            Button {
-                player.pause()
-                isPlaying = false
-                Task { await scanCurrentFrame() }
-            } label: {
-                Label("Scan this frame", systemImage: "camera.viewfinder")
-                    .font(Typography.callout.weight(.semibold))
-                    .foregroundStyle(Color.Brand.accentOn)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Spacing.sm)
-                    .background(Color.Brand.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.md))
-            }
         }
     }
 
@@ -879,9 +874,8 @@ struct ResultsView: View {
         timeObserverToken = nil
     }
 
-    private func scanCurrentFrame() async {
+    private func captureFrame(at time: CMTime) async {
         guard let url = videoURL else { return }
-        let time = videoPlayer?.currentTime() ?? .zero
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -889,8 +883,14 @@ struct ResultsView: View {
         generator.requestedTimeToleranceAfter = .zero
         generator.maximumSize = CGSize(width: 1024, height: 1024)
         guard let (cgImage, _) = try? await generator.image(at: time) else { return }
-        frameImageData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.9)
-        showFrameCropSheet = true
+        pausedFrameData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.9)
+    }
+
+    private func scanFrame(imageData: Data, cropRect: CGRect) async {
+        let uploadData = await ImageCropper.prepareForUpload(data: imageData, cropRect: cropRect)
+        frameImageData = imageData
+        frameScanUploadData = uploadData
+        showFrameResults = true
     }
 
     private func formatTime(_ seconds: Double) -> String {
@@ -971,6 +971,201 @@ private struct ShimmerRect: View {
                     isShimmering = true
                 }
             }
+    }
+}
+
+// MARK: — Inline video crop overlay
+
+/// Aspect-fit display rect of a video inside a container view.
+/// videoAspect > viewAspect → letterbox (black bars top/bottom)
+/// videoAspect < viewAspect → pillarbox (black bars left/right)
+private func videoDisplayRect(videoSize: CGSize, viewSize: CGSize) -> CGRect {
+    guard videoSize.width > 0, videoSize.height > 0,
+          viewSize.width > 0, viewSize.height > 0
+    else { return CGRect(origin: .zero, size: viewSize) }
+    let va = videoSize.width / videoSize.height
+    let vwa = viewSize.width / viewSize.height
+    let size: CGSize = va > vwa
+        ? CGSize(width: viewSize.width,       height: viewSize.width / va)
+        : CGSize(width: viewSize.height * va, height: viewSize.height)
+    return CGRect(
+        x: (viewSize.width  - size.width)  / 2,
+        y: (viewSize.height - size.height) / 2,
+        width: size.width, height: size.height
+    )
+}
+
+/// Crop overlay rendered directly on the paused video player.
+/// `cropRect` is kept in normalized coords (0–1) relative to the video display area,
+/// which matches `ImageCropper.prepareForUpload(data:cropRect:)` directly.
+private struct InlineVideoCropOverlay: View {
+    let frameData: Data
+    let videoSize: CGSize
+    let onConfirm: (CGRect) -> Void
+
+    @State private var cropRect = CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
+    @State private var saliencyReady = false
+    @State private var dragStart: CGRect? = nil
+    @State private var isScanning = false
+
+    private let handleSize: CGFloat = 22
+    private let minFraction: CGFloat = 0.05
+
+    var body: some View {
+        GeometryReader { geo in
+            let frame = videoDisplayRect(videoSize: videoSize, viewSize: geo.size)
+            let vc    = viewCropRect(frame: frame)
+
+            ZStack {
+                // Dim surround — even-odd fill punches a transparent hole at vc
+                Path { p in
+                    p.addRect(CGRect(origin: .zero, size: geo.size))
+                    p.addRect(vc)
+                }
+                .fill(Color.black.opacity(0.55), style: FillStyle(eoFill: true))
+                .allowsHitTesting(false)
+
+                // Rule-of-thirds grid
+                gridLines(vc: vc)
+
+                // Crop border
+                Rectangle()
+                    .strokeBorder(Color.white.opacity(0.9), lineWidth: 1.5)
+                    .frame(width: vc.width, height: vc.height)
+                    .position(x: vc.midX, y: vc.midY)
+                    .allowsHitTesting(false)
+
+                // Body drag — transparent fill captures touches in the interior
+                Color.white.opacity(0.001)
+                    .frame(
+                        width:  max(1, vc.width  - handleSize),
+                        height: max(1, vc.height - handleSize)
+                    )
+                    .position(x: vc.midX, y: vc.midY)
+                    .gesture(bodyGesture(frame: frame))
+
+                // Corner handles
+                cornerHandle(.topLeft,    at: CGPoint(x: vc.minX, y: vc.minY), frame: frame)
+                cornerHandle(.topRight,   at: CGPoint(x: vc.maxX, y: vc.minY), frame: frame)
+                cornerHandle(.bottomLeft, at: CGPoint(x: vc.minX, y: vc.maxY), frame: frame)
+                cornerHandle(.bottomRight,at: CGPoint(x: vc.maxX, y: vc.maxY), frame: frame)
+
+                if !saliencyReady {
+                    ProgressView().tint(.white)
+                }
+
+                // Scan button pinned to bottom of overlay
+                VStack {
+                    Spacer()
+                    if isScanning {
+                        ProgressView().tint(.white).padding(.bottom, 10)
+                    } else {
+                        Button {
+                            isScanning = true
+                            onConfirm(cropRect)
+                        } label: {
+                            Label("Scan this frame", systemImage: "camera.viewfinder")
+                                .font(Typography.callout.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 7)
+                                .background(Color.Brand.accent)
+                                .clipShape(Capsule())
+                        }
+                        .padding(.bottom, 10)
+                    }
+                }
+            }
+        }
+        .task {
+            let rect = await ImageCropper.saliencyRect(for: frameData)
+            withAnimation(.spring(duration: 0.4)) { cropRect = rect }
+            saliencyReady = true
+        }
+    }
+
+    private func viewCropRect(frame: CGRect) -> CGRect {
+        CGRect(
+            x: frame.minX + cropRect.minX * frame.width,
+            y: frame.minY + cropRect.minY * frame.height,
+            width: cropRect.width  * frame.width,
+            height: cropRect.height * frame.height
+        )
+    }
+
+    private func gridLines(vc: CGRect) -> some View {
+        let tw = vc.width / 3, th = vc.height / 3
+        return Path { p in
+            for i in 1...2 {
+                let x = vc.minX + tw * CGFloat(i)
+                p.move(to: CGPoint(x: x, y: vc.minY))
+                p.addLine(to: CGPoint(x: x, y: vc.maxY))
+                let y = vc.minY + th * CGFloat(i)
+                p.move(to: CGPoint(x: vc.minX, y: y))
+                p.addLine(to: CGPoint(x: vc.maxX, y: y))
+            }
+        }
+        .stroke(Color.white.opacity(0.3), lineWidth: 0.5)
+        .allowsHitTesting(false)
+    }
+
+    private enum Corner { case topLeft, topRight, bottomLeft, bottomRight }
+
+    private func cornerHandle(_ corner: Corner, at point: CGPoint, frame: CGRect) -> some View {
+        Circle()
+            .fill(Color.white)
+            .frame(width: handleSize, height: handleSize)
+            .shadow(color: .black.opacity(0.35), radius: 3)
+            .position(point)
+            .gesture(cornerGesture(corner, frame: frame))
+    }
+
+    private func bodyGesture(frame: CGRect) -> some Gesture {
+        DragGesture()
+            .onChanged { drag in
+                if dragStart == nil { dragStart = cropRect }
+                guard let start = dragStart else { return }
+                let dx = drag.translation.width  / frame.width
+                let dy = drag.translation.height / frame.height
+                cropRect = CGRect(
+                    x: min(max(start.minX + dx, 0), 1 - start.width),
+                    y: min(max(start.minY + dy, 0), 1 - start.height),
+                    width: start.width, height: start.height
+                )
+            }
+            .onEnded { _ in dragStart = nil }
+    }
+
+    private func cornerGesture(_ corner: Corner, frame: CGRect) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { drag in
+                if dragStart == nil { dragStart = cropRect }
+                guard let start = dragStart else { return }
+                let dx = drag.translation.width  / frame.width
+                let dy = drag.translation.height / frame.height
+                cropRect = adjustedRect(start: start, corner: corner, dx: dx, dy: dy)
+            }
+            .onEnded { _ in dragStart = nil }
+    }
+
+    private func adjustedRect(start: CGRect, corner: Corner, dx: CGFloat, dy: CGFloat) -> CGRect {
+        var x0 = start.minX, y0 = start.minY
+        var x1 = start.maxX, y1 = start.maxY
+        switch corner {
+        case .topLeft:
+            x0 = min(max(x0 + dx, 0), x1 - minFraction)
+            y0 = min(max(y0 + dy, 0), y1 - minFraction)
+        case .topRight:
+            x1 = min(max(x1 + dx, x0 + minFraction), 1)
+            y0 = min(max(y0 + dy, 0), y1 - minFraction)
+        case .bottomLeft:
+            x0 = min(max(x0 + dx, 0), x1 - minFraction)
+            y1 = min(max(y1 + dy, y0 + minFraction), 1)
+        case .bottomRight:
+            x1 = min(max(x1 + dx, x0 + minFraction), 1)
+            y1 = min(max(y1 + dy, y0 + minFraction), 1)
+        }
+        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
     }
 }
 

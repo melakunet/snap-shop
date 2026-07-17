@@ -4,11 +4,13 @@ import UIKit
 
 enum BackendError: Error, LocalizedError {
     case httpError(Int, String)
+    case noProductsFound(String)
     case decodingError(Error)
 
     var errorDescription: String? {
         switch self {
         case .httpError(let code, let body): "HTTP \(code): \(body)"
+        case .noProductsFound(let msg): msg
         case .decodingError(let err): "Decode error: \(err.localizedDescription)"
         }
     }
@@ -324,6 +326,15 @@ enum BackendClient {
     private static func checkHTTP(_ response: URLResponse, _ data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
+            if http.statusCode == 422 {
+                struct ErrEnvelope: Decodable {
+                    struct Inner: Decodable { let message: String }
+                    let error: Inner
+                }
+                if let env = try? JSONDecoder().decode(ErrEnvelope.self, from: data) {
+                    throw BackendError.noProductsFound(env.error.message)
+                }
+            }
             let preview = String(data: data, encoding: .utf8).map { String($0.prefix(300)) } ?? ""
             throw BackendError.httpError(http.statusCode, preview)
         }

@@ -27,6 +27,11 @@ describe('errorBody()', () => {
     const body = errorBody('internal', 'Internal server error')
     expect(body).toEqual({ error: { code: 'internal', message: 'Internal server error' } })
   })
+
+  it('returns correct structure for no_products_found', () => {
+    const body = errorBody('no_products_found', "Couldn't spot a product")
+    expect(body).toEqual({ error: { code: 'no_products_found', message: "Couldn't spot a product" } })
+  })
 })
 
 describe('HTTP status codes for ErrorCode', () => {
@@ -36,6 +41,7 @@ describe('HTTP status codes for ErrorCode', () => {
     unauthorized: 401,
     rate_limited: 429,
     upstream_error: 502,
+    no_products_found: 422,
     internal: 500,
   }
 
@@ -56,7 +62,7 @@ describe('HTTP status codes for ErrorCode', () => {
   })
 
   it('each ErrorCode produces an object with error.code and error.message', () => {
-    const codes: ErrorCode[] = ['unauthorized', 'rate_limited', 'invalid_input', 'upstream_error', 'internal']
+    const codes: ErrorCode[] = ['unauthorized', 'rate_limited', 'invalid_input', 'upstream_error', 'no_products_found', 'internal']
     for (const code of codes) {
       const body = errorBody(code, 'test message')
       expect(body.error.code).toBe(code)
