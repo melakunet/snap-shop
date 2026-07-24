@@ -1,0 +1,2 @@
+// Debug environment — Cloudflare Worker (dev)
+BACKEND_BASE_URL = https:/$()/snap-shop-api-dev.etefmelaku.workers.dev

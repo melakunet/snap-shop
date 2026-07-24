@@ -55,6 +55,29 @@ enum ImageCropper {
 
     // MARK: — Manual crop (CropSheet API)
 
+    /// Extract visible text from an image using on-device Vision OCR.
+    /// Returns a short string of the most confident recognized tokens, empty when nothing useful is found.
+    static func recognizeText(in imageData: Data) async -> String {
+        await Task.detached(priority: .userInitiated) { () -> String in
+            guard let cgImage = decodeCGImage(from: imageData) else { return "" }
+
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+
+            try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+
+            let candidates = (request.results ?? [])
+                .compactMap { $0.topCandidates(1).first }
+                .filter { $0.confidence >= 0.5 }
+                .map { $0.string }
+                .filter { $0.count >= 3 && $0.contains(where: { $0.isLetter }) }
+
+            let joined = candidates.prefix(6).joined(separator: " ")
+            return String(joined.prefix(80))
+        }.value
+    }
+
     /// Returns the attention-saliency suggested crop rect in normalized coordinates
     /// (top-left origin, 0–1 range). Falls back to center-80 % when Vision finds nothing.
     static func saliencyRect(for data: Data) async -> CGRect {

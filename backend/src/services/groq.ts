@@ -37,7 +37,7 @@ export async function identifyWithGroq(
   mediaType: string,
   env: Env,
 ): Promise<IdentifyResult | null> {
-  if (!env.GROQ_API_KEY) return null
+  if (!env.GROQ_API_KEY) throw new Error('GROQ_API_KEY is not configured')
 
   const message: GroqMessage = {
     role: 'user',
@@ -50,26 +50,37 @@ export async function identifyWithGroq(
     ],
   }
 
+  const res = await fetch(GROQ_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.GROQ_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      max_tokens: 512,
+      messages: [message],
+    }),
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    console.error(
+      `[groq] upstream error — model:${GROQ_MODEL} status:${res.status} body:${body.slice(0, 500)}`,
+    )
+    throw new Error(`Groq ${res.status}: ${body.slice(0, 300)}`)
+  }
+
+  const data = await res.json() as GroqResponse
+  if (data.error) {
+    console.error(
+      `[groq] api error — model:${GROQ_MODEL} message:${data.error.message}`,
+    )
+    throw new Error(`Groq error: ${data.error.message}`)
+  }
+
+  const raw = data.choices?.[0]?.message?.content ?? ''
   try {
-    const res = await fetch(GROQ_API_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        max_tokens: 512,
-        messages: [message],
-      }),
-    })
-
-    if (!res.ok) return null
-
-    const data = await res.json() as GroqResponse
-    if (data.error) return null
-
-    const raw = data.choices?.[0]?.message?.content ?? ''
     const cleaned = raw.replace(/```json\s*|```\s*/g, '').trim()
     const parsed: unknown = JSON.parse(cleaned)
     const result = IdentifyResult.safeParse(parsed)

@@ -1,7 +1,6 @@
 import { Hono } from 'hono'
 import type { Env, Variables } from '../lib/schema'
 import { errorBody } from '../lib/errors'
-import { identifyWithClaude } from '../services/claude'
 import { identifyWithGroq } from '../services/groq'
 import { lookupBarcode } from '../services/barcode'
 import { captureError } from '../lib/sentry'
@@ -22,10 +21,8 @@ function toBase64(buf: ArrayBuffer): string {
 }
 
 // POST /identify/precision
-// Provider chain: barcode (if provided) → Groq Llama 4 Scout → Claude Sonnet (→ Opus for pro+low conf)
+// Provider chain: barcode (if provided) → Groq Llama 4 Scout
 route.post('/', async (c) => {
-  const isPro = c.req.header('X-Tier') === 'pro'
-
   let formData: FormData
   try {
     formData = await c.req.formData()
@@ -69,24 +66,23 @@ route.post('/', async (c) => {
 
     const imageBase64 = toBase64(await file.arrayBuffer())
 
-    // Step 2 — Groq Llama 4 Scout (free first-pass, skipped if key absent)
+    // Step 2 — Groq Llama 4 Scout
     const groqResult = await identifyWithGroq(imageBase64, file.type, c.env)
-    if (groqResult && groqResult.confidence >= 0.6) {
-      return c.json(groqResult)
-    }
+    if (groqResult) return c.json(groqResult)
 
-    // Step 3 — Claude Sonnet (escalates to Opus for pro + low confidence)
-    const claudeResult = await identifyWithClaude(imageBase64, file.type, c.env, isPro)
-    return c.json(claudeResult)
+    return c.json(
+      errorBody('no_products_found', "Couldn't identify this product — try getting closer or cropping tighter"),
+      422,
+    )
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err))
+    console.error(`[precision] caught error: ${error.message}`)
     await captureError(c.env.SENTRY_DSN, {
       error,
       route: 'POST /identify/precision',
       requestId: c.get('requestId'),
       latencyMs: Date.now() - (c.get('startMs') ?? Date.now()),
       status: 502,
-      extras: { tier: isPro ? 'pro' : 'free' },
     })
     return c.json(errorBody('upstream_error', 'Product identification failed'), 502)
   }

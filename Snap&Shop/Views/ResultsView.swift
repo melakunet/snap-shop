@@ -56,9 +56,13 @@ struct ResultsView: View {
     @State private var playerDuration: Double = 1
     @State private var timeObserverToken: Any? = nil
     @State private var pausedFrameData: Data? = nil
+    @State private var pausedVideoSize: CGSize = .zero   // cgImage dims from captureFrame; used by overlay
     @State private var frameImageData: Data? = nil
     @State private var showFrameResults = false
     @State private var frameScanUploadData: Data? = nil
+    #if DEBUG
+    @State private var debugCropPreview: UIImage? = nil
+    #endif
 
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
@@ -796,7 +800,12 @@ struct ResultsView: View {
                 PlayerLayerView(player: player)
 
                 if !isPlaying, let frameData = pausedFrameData {
-                    let vidSize = player.currentItem?.presentationSize ?? CGSize(width: 16, height: 9)
+                    // Use cgImage dimensions (set by captureFrame): these are transform-corrected
+                    // (appliesPreferredTrackTransform=true) so they always match the visual layout.
+                    // presentationSize can return pre-transform (landscape) dims for portrait videos.
+                    let vidSize = pausedVideoSize.width > 0
+                        ? pausedVideoSize
+                        : (player.currentItem?.presentationSize ?? CGSize(width: 16, height: 9))
                     InlineVideoCropOverlay(
                         frameData: frameData,
                         videoSize: vidSize,
@@ -805,6 +814,31 @@ struct ResultsView: View {
                         }
                     )
                 }
+
+                #if DEBUG
+                if let preview = debugCropPreview {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            VStack(spacing: 3) {
+                                Text("SENT").font(.system(size: 9, weight: .bold)).foregroundStyle(.yellow)
+                                Image(uiImage: preview)
+                                    .resizable().scaledToFit()
+                                    .frame(width: 80, height: 80)
+                                    .background(.black)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.yellow, lineWidth: 1.5))
+                            }
+                            .padding(6)
+                            .background(.black.opacity(0.75))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .padding(6)
+                            .onTapGesture { debugCropPreview = nil }
+                        }
+                        Spacer()
+                    }
+                }
+                #endif
             }
             .frame(height: 200)
             .clipShape(RoundedRectangle(cornerRadius: Radius.md))
@@ -883,11 +917,37 @@ struct ResultsView: View {
         generator.requestedTimeToleranceAfter = .zero
         generator.maximumSize = CGSize(width: 1024, height: 1024)
         guard let (cgImage, _) = try? await generator.image(at: time) else { return }
+        // Store the actual generated image dimensions — transform-corrected, aspect ratio is what
+        // both the player and ImageCropper see. Do NOT use presentationSize: it can return the
+        // pre-transform (landscape) size for portrait videos shot on iPhone.
+        pausedVideoSize = CGSize(width: cgImage.width, height: cgImage.height)
         pausedFrameData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.9)
+        #if DEBUG
+        print("[CropDebug] captureFrame: cgImage \(cgImage.width)×\(cgImage.height), pausedVideoSize=\(pausedVideoSize)")
+        #endif
     }
 
     private func scanFrame(imageData: Data, cropRect: CGRect) async {
+        #if DEBUG
+        if let src = UIImage(data: imageData)?.cgImage {
+            let pw = CGFloat(src.width), ph = CGFloat(src.height)
+            let px = CGRect(
+                x: cropRect.minX * pw, y: cropRect.minY * ph,
+                width: cropRect.width * pw, height: cropRect.height * ph
+            )
+            print("[CropDebug] scanFrame: image \(Int(pw))×\(Int(ph))")
+            print("[CropDebug] cropRect (normalized): \(String(format:"(%.3f,%.3f) \(String(format:"%.3f",cropRect.width))×%.3f",cropRect.minX,cropRect.minY,cropRect.height))")
+            print("[CropDebug] pixelRect: (\(Int(px.minX)),\(Int(px.minY))) \(Int(px.width))×\(Int(px.height))")
+        }
+        #endif
         let uploadData = await ImageCropper.prepareForUpload(data: imageData, cropRect: cropRect)
+        #if DEBUG
+        if let preview = UIImage(data: uploadData) {
+            let scale = Int(preview.scale)
+            print("[CropDebug] upload image: \(Int(preview.size.width*preview.scale))×\(Int(preview.size.height*preview.scale)) @\(scale)x → \(uploadData.count/1024) KB")
+            debugCropPreview = preview
+        }
+        #endif
         frameImageData = imageData
         frameScanUploadData = uploadData
         showFrameResults = true
@@ -1006,6 +1066,7 @@ private struct InlineVideoCropOverlay: View {
     @State private var cropRect = CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
     @State private var saliencyReady = false
     @State private var dragStart: CGRect? = nil
+    @State private var userHasDragged = false   // prevents saliency from overwriting a manual drag
     @State private var isScanning = false
 
     private let handleSize: CGFloat = 22
@@ -1061,6 +1122,15 @@ private struct InlineVideoCropOverlay: View {
                         ProgressView().tint(.white).padding(.bottom, 10)
                     } else {
                         Button {
+                            #if DEBUG
+                            let dbgFrame = videoDisplayRect(videoSize: videoSize, viewSize: geo.size)
+                            let dbgVc    = viewCropRect(frame: dbgFrame)
+                            print("[CropDebug] geo.size: \(geo.size)")
+                            print("[CropDebug] videoSize: \(videoSize)")
+                            print("[CropDebug] videoDisplayRect: \(dbgFrame)")
+                            print("[CropDebug] vc (view coords): \(dbgVc)")
+                            print("[CropDebug] cropRect sent (normalized): \(cropRect)")
+                            #endif
                             isScanning = true
                             onConfirm(cropRect)
                         } label: {
@@ -1079,7 +1149,11 @@ private struct InlineVideoCropOverlay: View {
         }
         .task {
             let rect = await ImageCropper.saliencyRect(for: frameData)
-            withAnimation(.spring(duration: 0.4)) { cropRect = rect }
+            // Only apply saliency if the user hasn't already dragged to their own region.
+            // Without this guard, Vision finishing after a drag snaps the rect back.
+            if !userHasDragged {
+                withAnimation(.spring(duration: 0.4)) { cropRect = rect }
+            }
             saliencyReady = true
         }
     }
@@ -1123,6 +1197,7 @@ private struct InlineVideoCropOverlay: View {
     private func bodyGesture(frame: CGRect) -> some Gesture {
         DragGesture()
             .onChanged { drag in
+                userHasDragged = true
                 if dragStart == nil { dragStart = cropRect }
                 guard let start = dragStart else { return }
                 let dx = drag.translation.width  / frame.width
@@ -1139,6 +1214,7 @@ private struct InlineVideoCropOverlay: View {
     private func cornerGesture(_ corner: Corner, frame: CGRect) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { drag in
+                userHasDragged = true
                 if dragStart == nil { dragStart = cropRect }
                 guard let start = dragStart else { return }
                 let dx = drag.translation.width  / frame.width

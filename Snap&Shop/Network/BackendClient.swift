@@ -100,11 +100,32 @@ enum BackendClient {
         return try decode([ShopItem].self, from: data)
     }
 
-    /// Full precision scan: identify image then fetch prices.
+    /// Full precision scan: identify image and run OCR in parallel, enrich query, then fetch prices.
     static func scan(imageData: Data) async throws -> (IdentifyResult, [ShopItem]) {
-        let product = try await identifyPrecision(imageData: imageData)
-        let prices = try await shop(query: product.searchQuery)
+        async let productResult = identifyPrecision(imageData: imageData)
+        async let ocrText = ImageCropper.recognizeText(in: imageData)
+
+        let product = try await productResult
+        let text = await ocrText
+        let query = enrichedQuery(base: product.searchQuery, ocr: text)
+        #if DEBUG
+        if !text.isEmpty {
+            print("[OCR] extracted: \"\(text)\"")
+            print("[OCR] enriched query: \"\(query)\"")
+        }
+        #endif
+        let prices = try await shop(query: query)
         return (product, prices)
+    }
+
+    private static func enrichedQuery(base: String, ocr: String) -> String {
+        guard !ocr.isEmpty else { return base }
+        let baseLower = base.lowercased()
+        let extra = ocr.split(separator: " ")
+            .map(String.init)
+            .filter { !baseLower.contains($0.lowercased()) }
+            .joined(separator: " ")
+        return extra.isEmpty ? base : "\(base) \(extra)"
     }
 
     // MARK: — Deep

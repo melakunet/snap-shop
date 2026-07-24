@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		B55C864C3013A6AC0093A908 /* Debug.xcconfig in Resources */ = {isa = PBXBuildFile; fileRef = B55C864B3013A6AC0093A908 /* Debug.xcconfig */; };
+		B55C864E3013A70E0093A908 /* Release.xcconfig in Resources */ = {isa = PBXBuildFile; fileRef = B55C864D3013A70E0093A908 /* Release.xcconfig */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		B5A0482E2FC9D5C200C61847 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -24,6 +29,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		B55C864B3013A6AC0093A908 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		B55C864D3013A70E0093A908 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		B5A0481E2FC9D5C000C61847 /* Snap&Shop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Snap&Shop.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B5A0482D2FC9D5C200C61847 /* Snap&ShopTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Snap&ShopTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B5A048372FC9D5C200C61847 /* Snap&ShopUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Snap&ShopUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -92,6 +99,8 @@
 				B5A048302FC9D5C200C61847 /* Snap&ShopTests */,
 				B5A0483A2FC9D5C200C61847 /* Snap&ShopUITests */,
 				B5A0481F2FC9D5C000C61847 /* Products */,
+				B55C864B3013A6AC0093A908 /* Debug.xcconfig */,
+				B55C864D3013A70E0093A908 /* Release.xcconfig */,
 			);
 			sourceTree = "<group>";
 		};
@@ -225,6 +234,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B55C864C3013A6AC0093A908 /* Debug.xcconfig in Resources */,
+				B55C864E3013A70E0093A908 /* Release.xcconfig in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -284,6 +295,7 @@
 /* Begin XCBuildConfiguration section */
 		B5A0483F2FC9D5C200C61847 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B55C864B3013A6AC0093A908 /* Debug.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -348,6 +360,7 @@
 		};
 		B5A048402FC9D5C200C61847 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B55C864D3013A70E0093A908 /* Release.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
