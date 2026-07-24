@@ -58,8 +58,15 @@ struct CameraView: View {
                     transcriptVideoPlayer = nil
                 }
             }
+            // Navigate only after the sheet has fully dismissed — setting showResults = true
+            // in the same update as the cover dismissal causes competing animations where
+            // SwiftUI drops the navigation push (ResultsView appears then immediately pops).
             .fullScreenCover(isPresented: $showVideoFrameCrop, onDismiss: {
-                if !showResults { frameFromVideo = nil }
+                if pendingUploadData != nil && frameFromVideo != nil {
+                    showResults = true
+                } else {
+                    frameFromVideo = nil
+                }
             }) {
                 if let data = frameFromVideo {
                     CropSheet(
@@ -67,7 +74,6 @@ struct CameraView: View {
                         onConfirm: { uploadData in
                             pendingUploadData = uploadData
                             showVideoFrameCrop = false
-                            showResults = true
                         },
                         onCancel: {
                             showVideoFrameCrop = false
@@ -77,9 +83,11 @@ struct CameraView: View {
                 }
             }
             .fullScreenCover(isPresented: $showCropSheet, onDismiss: {
-                // Swipe-to-dismiss is disabled (fullScreenCover), but if dismissed via Cancel
-                // the handler already clears capturedImageData. This is a safety net.
-                if !showResults { session.capturedImageData = nil }
+                if pendingUploadData != nil {
+                    showResults = true
+                } else {
+                    session.capturedImageData = nil
+                }
             }) {
                 if let data = session.capturedImageData {
                     CropSheet(
@@ -87,7 +95,6 @@ struct CameraView: View {
                         onConfirm: { uploadData in
                             pendingUploadData = uploadData
                             showCropSheet = false
-                            showResults = true
                         },
                         onCancel: {
                             showCropSheet = false
