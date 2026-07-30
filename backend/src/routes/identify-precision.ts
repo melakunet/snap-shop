@@ -84,7 +84,7 @@ route.post('/', async (c) => {
       latencyMs: Date.now() - (c.get('startMs') ?? Date.now()),
       status: 502,
     })
-    return c.json(errorBody('upstream_error', 'Product identification failed'), 502)
+    return c.json(errorBody('upstream_error', `Product identification failed: ${error.message}`), 502)
   }
 })
 

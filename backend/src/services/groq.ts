@@ -2,7 +2,7 @@ import type { Env } from '../lib/schema'
 import { IdentifyResult } from '../lib/schema'
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
-const GROQ_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+const GROQ_MODEL = 'qwen/qwen3.6-27b'
 
 const USER_PROMPT = `Identify the product in this image. Respond with exactly this JSON object and nothing else:
 {"brand":"","model":"","category":"","distinguishing_features":[],"confidence":0.0,"search_query":""}
@@ -58,7 +58,8 @@ export async function identifyWithGroq(
     },
     body: JSON.stringify({
       model: GROQ_MODEL,
-      max_tokens: 512,
+      max_completion_tokens: 512,
+      reasoning_effort: 'none',  // disable thinking mode — response must be plain JSON
       messages: [message],
     }),
   })
