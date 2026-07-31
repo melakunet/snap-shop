@@ -41,9 +41,14 @@ struct HistoryView: View {
     private var listView: some View {
         List {
             ForEach(filteredRecords) { record in
-                historyRow(record)
-                    .listRowBackground(Color.Brand.surface)
-                    .listRowSeparatorTint(Color.Brand.border)
+                NavigationLink {
+                    let query = record.searchQuery.isEmpty ? record.productName : record.searchQuery
+                    ResultsView(textQuery: query)
+                } label: {
+                    historyRow(record)
+                }
+                .listRowBackground(Color.Brand.surface)
+                .listRowSeparatorTint(Color.Brand.border)
             }
             .onDelete { offsets in
                 let toDelete = offsets.map { filteredRecords[$0] }

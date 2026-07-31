@@ -62,52 +62,66 @@ interface SerpProductResponse {
 export async function fetchProductReviews(productId: string, env: Env): Promise<ProductReviews> {
   if (!env.SERPAPI_KEY) return mockReviews()
 
-  const params = new URLSearchParams({
-    engine: 'google_product',
-    product_id: productId,
-    api_key: env.SERPAPI_KEY,
-  })
+  try {
+    const params = new URLSearchParams({
+      engine: 'google_product',
+      product_id: productId,
+      api_key: env.SERPAPI_KEY,
+    })
 
-  const res = await fetch(`${SERPAPI_URL}?${params}`)
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`SerpAPI ${res.status}: ${body.slice(0, 300)}`)
-  }
-
-  const data = await res.json() as SerpProductResponse
-  if (data.error) throw new Error(`SerpAPI error: ${data.error}`)
-
-  const product = data.product_results ?? {}
-  const reviewsData = data.reviews_results ?? {}
-
-  // Build the rating breakdown — SerpAPI returns [{stars: 5, amount: 8210}, ...]
-  let breakdown: ProductReviews['breakdown']
-  const ratings = reviewsData.ratings ?? []
-  if (ratings.length > 0) {
-    const byStars: Record<number, number> = {}
-    for (const r of ratings) {
-      if (r.stars != null) byStars[r.stars] = r.amount ?? 0
+    const res = await fetch(`${SERPAPI_URL}?${params}`)
+    if (!res.ok) {
+      const body = await res.text()
+      console.error(`[product-reviews] SerpAPI ${res.status}: ${body.slice(0, 300)} — falling back to mock`)
+      return mockReviews()
     }
-    breakdown = {
-      five: byStars[5] ?? 0,
-      four: byStars[4] ?? 0,
-      three: byStars[3] ?? 0,
-      two: byStars[2] ?? 0,
-      one: byStars[1] ?? 0,
+
+    const data = await res.json() as SerpProductResponse
+    if (data.error) {
+      console.error(`[product-reviews] SerpAPI error: ${data.error} — falling back to mock`)
+      return mockReviews()
     }
-  }
 
-  const topReviews = (reviewsData.reviews ?? []).slice(0, 5).map((r) => ({
-    author: r.author ?? undefined,
-    rating: r.rating ?? undefined,
-    text: r.content ?? r.snippet ?? '',
-    date: r.date ?? undefined,
-  })).filter((r) => r.text.length > 0)
+    const product = data.product_results ?? {}
+    const reviewsData = data.reviews_results ?? {}
 
-  return {
-    rating: product.rating ?? 0,
-    review_count: product.reviews ?? 0,
-    ...(breakdown ? { breakdown } : {}),
-    top_reviews: topReviews,
+    // If SerpAPI returned no useful data for this product ID, fall back to mock.
+    if (!product.rating && !(reviewsData.reviews?.length)) {
+      return mockReviews()
+    }
+
+    // Build the rating breakdown — SerpAPI returns [{stars: 5, amount: 8210}, ...]
+    let breakdown: ProductReviews['breakdown']
+    const ratings = reviewsData.ratings ?? []
+    if (ratings.length > 0) {
+      const byStars: Record<number, number> = {}
+      for (const r of ratings) {
+        if (r.stars != null) byStars[r.stars] = r.amount ?? 0
+      }
+      breakdown = {
+        five: byStars[5] ?? 0,
+        four: byStars[4] ?? 0,
+        three: byStars[3] ?? 0,
+        two: byStars[2] ?? 0,
+        one: byStars[1] ?? 0,
+      }
+    }
+
+    const topReviews = (reviewsData.reviews ?? []).slice(0, 5).map((r) => ({
+      author: r.author ?? undefined,
+      rating: r.rating ?? undefined,
+      text: r.content ?? r.snippet ?? '',
+      date: r.date ?? undefined,
+    })).filter((r) => r.text.length > 0)
+
+    return {
+      rating: product.rating ?? 0,
+      review_count: product.reviews ?? 0,
+      ...(breakdown ? { breakdown } : {}),
+      top_reviews: topReviews,
+    }
+  } catch (err) {
+    console.error('[product-reviews] unexpected error — falling back to mock:', err)
+    return mockReviews()
   }
 }

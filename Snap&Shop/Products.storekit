@@ -1,0 +1,73 @@
+{
+  "identifier" : "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+  "nonRenewingSubscriptions" : [],
+  "products" : [],
+  "settings" : {
+    "_askToBuyEnabled" : false,
+    "_customerEmail" : null,
+    "_storefront" : "USA",
+    "_storeKitErrors" : []
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "B2C3D4E5-F6A7-8901-BCDE-F12345678901",
+      "localizations" : [],
+      "name" : "Pro",
+      "subscriptions" : [
+        {
+          "adHocOfferCodeRedemption" : false,
+          "debugDescription" : "Snap&Shop Pro Monthly",
+          "displayPrice" : "6.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "id" : "snapshop_pro_monthly",
+          "internalID" : "C3D4E5F6-A7B8-9012-CDEF-123456789012",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited Precision scans, Deep/Video Scan, live prices from 6+ retailers, and price-drop alerts.",
+              "displayName" : "Snap&Shop Pro Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "snapshop_pro_monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Pro Monthly",
+          "subscriptionGroupID" : "B2C3D4E5-F6A7-8901-BCDE-F12345678901",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOfferCodeRedemption" : false,
+          "debugDescription" : "Snap&Shop Pro Annual",
+          "displayPrice" : "39.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "id" : "snapshop_pro_annual",
+          "internalID" : "D4E5F6A7-B8C9-0123-DEF0-234567890123",
+          "introductoryOffer" : {
+            "duration" : "P3D",
+            "offerID" : null,
+            "paymentMode" : "FreeTrial",
+            "periodCount" : 1
+          },
+          "localizations" : [
+            {
+              "description" : "Unlimited Precision scans, Deep/Video Scan, live prices from 6+ retailers, price-drop alerts, and iCloud sync. Includes a 3-day free trial.",
+              "displayName" : "Snap&Shop Pro Annual",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "snapshop_pro_annual",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Pro Annual",
+          "subscriptionGroupID" : "B2C3D4E5-F6A7-8901-BCDE-F12345678901",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 2,
+    "minor" : 0
+  }
+}

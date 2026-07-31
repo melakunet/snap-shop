@@ -8,6 +8,9 @@ struct SettingsView: View {
     @State private var haptics = true
     @State private var selectedRetailers: Set<String> = Set(Retailer.all.map(\.name))
     @State private var showSignOutConfirm = false
+    #if DEBUG
+    @State private var quotaUsed = QuotaManager.scansUsed()
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -17,6 +20,9 @@ struct SettingsView: View {
                 notificationsSection
                 privacySection
                 accountSection
+                #if DEBUG
+                debugSection
+                #endif
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
@@ -177,6 +183,34 @@ struct SettingsView: View {
         .listRowBackground(Color.Brand.surface)
         .listRowSeparatorTint(Color.Brand.border)
     }
+
+    #if DEBUG
+    private var debugSection: some View {
+        Section {
+            HStack {
+                Text("Precision Scans Used")
+                    .font(Typography.body)
+                    .foregroundStyle(Color.Brand.textPrimary)
+                Spacer()
+                Text("\(quotaUsed) / \(QuotaManager.freeLimit)")
+                    .font(Typography.body)
+                    .foregroundStyle(Color.Brand.textSecondary)
+            }
+            Button {
+                QuotaManager.resetForDebug()
+                quotaUsed = QuotaManager.scansUsed()
+            } label: {
+                Text("Reset Quota")
+                    .font(Typography.body)
+                    .foregroundStyle(Color.Brand.error)
+            }
+        } header: {
+            sectionHeader("DEBUG")
+        }
+        .listRowBackground(Color.Brand.surface)
+        .listRowSeparatorTint(Color.Brand.border)
+    }
+    #endif
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)

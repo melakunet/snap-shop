@@ -85,7 +85,14 @@ export async function identifyWithGroq(
     const cleaned = raw.replace(/```json\s*|```\s*/g, '').trim()
     const parsed: unknown = JSON.parse(cleaned)
     const result = IdentifyResult.safeParse(parsed)
-    return result.success ? result.data : null
+    if (!result.success) return null
+    const out = { ...result.data }
+    // Groq sometimes returns empty search_query; synthesise one from available fields.
+    if (!out.search_query.trim()) {
+      const parts = [out.brand, out.model, out.category].filter(s => s.trim())
+      out.search_query = parts.join(' ')
+    }
+    return out.search_query.trim() ? out : null
   } catch {
     return null
   }

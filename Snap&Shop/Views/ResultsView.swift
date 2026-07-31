@@ -15,6 +15,7 @@ struct PriceResult: Identifiable {
     let title: String?
     let snippet: String?
     let productId: String?
+    let extractedPrice: Double
 }
 
 enum SortMode: String, CaseIterable {
@@ -48,7 +49,6 @@ struct ResultsView: View {
     @State private var phase: ResultsPhase
     @State private var videoPlayer: AVPlayer?
     @State private var identifyResult: IdentifyResult?
-    @State private var isSaved = false
     @State private var fetchID = 0
     @State private var sortMode: SortMode = .price
     @State private var isPlaying = true
@@ -67,6 +67,7 @@ struct ResultsView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Query private var savedItems: [SavedItem]
 
     init(
         scanMode: ScanMode = .precision,
@@ -118,9 +119,16 @@ struct ResultsView: View {
 
                 // If identify already ran (re-sort): skip identify, just re-fetch /shop
                 if let result = identifyResult {
-                    shopItems = try await BackendClient.shop(query: result.searchQuery, sort: sort)
+                    let q = result.searchQuery.trimmingCharacters(in: .whitespaces)
+                    guard !q.isEmpty else {
+                        phase = .error("Couldn't build a search query — try a clearer photo.")
+                        return
+                    }
+                    shopItems = try await BackendClient.shop(query: q, sort: sort)
                 } else if let query = textQuery {
-                    shopItems = try await BackendClient.shop(query: query, sort: sort)
+                    let q = query.trimmingCharacters(in: .whitespaces)
+                    guard !q.isEmpty else { phase = .empty; return }
+                    shopItems = try await BackendClient.shop(query: q, sort: sort)
                 } else if let data = imageData {
                     let toUpload: Data
                     if let preComputed = uploadData {
@@ -265,7 +273,8 @@ struct ResultsView: View {
                     reviewCount: item.reviewCount,
                     title: item.title,
                     snippet: item.snippet,
-                    productId: item.productId
+                    productId: item.productId,
+                    extractedPrice: item.extractedPrice
                 )
             }
         } else {
@@ -283,7 +292,8 @@ struct ResultsView: View {
                     reviewCount: item.reviewCount,
                     title: item.title,
                     snippet: item.snippet,
-                    productId: item.productId
+                    productId: item.productId,
+                    extractedPrice: item.extractedPrice
                 )
             }
         }
@@ -963,14 +973,46 @@ struct ResultsView: View {
 
     private var saveButton: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                withAnimation(.spring(duration: 0.25)) { isSaved.toggle() }
-            } label: {
-                Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
-                    .foregroundStyle(Color.Brand.accent)
-                    .symbolEffect(.bounce, value: isSaved)
+            if let result = identifyResult {
+                if case .loaded(let prices) = phase, !prices.isEmpty {
+                    Button {
+                        withAnimation(.spring(duration: 0.25)) {
+                            toggleSave(result: result, prices: prices)
+                        }
+                    } label: {
+                        Image(systemName: currentlySaved ? "bookmark.fill" : "bookmark")
+                            .foregroundStyle(Color.Brand.accent)
+                            .symbolEffect(.bounce, value: currentlySaved)
+                    }
+                }
             }
         }
+    }
+
+    private var currentlySaved: Bool {
+        guard let sq = identifyResult?.searchQuery, !sq.isEmpty else { return false }
+        return savedItems.contains { $0.searchQuery == sq }
+    }
+
+    private func toggleSave(result: IdentifyResult, prices: [PriceResult]) {
+        let sq = result.searchQuery
+        if let existing = savedItems.first(where: { $0.searchQuery == sq }) {
+            modelContext.delete(existing)
+        } else {
+            guard !prices.isEmpty else { return }
+            let bestItem = prices.first(where: { $0.isBest }) ?? prices[0]
+            let parts = [result.brand, result.model].filter { !$0.isEmpty }
+            let pName = parts.isEmpty ? result.category.capitalized : parts.joined(separator: " ")
+            modelContext.insert(SavedItem(
+                productName: pName,
+                searchQuery: sq,
+                thumbnailData: downsampleImageData(imageData, maxDimension: 60),
+                savedPrice: bestItem.extractedPrice,
+                link: bestItem.link,
+                source: bestItem.retailer
+            ))
+        }
+        try? modelContext.save()
     }
 }
 
@@ -1249,16 +1291,21 @@ private struct InlineVideoCropOverlay: View {
 
 extension PriceResult {
     static let samples: [PriceResult] = [
-        PriceResult(retailer: "Amazon",   price: "$279.99", shipping: "Free",   isBest: true,  link: "", thumbnail: "", rating: 4.8, reviewCount: 12543, title: "Nike Air Force 1 Low White/White",      snippet: "Top-rated with fast Prime delivery. Highly rated by thousands of customers.", productId: "mock_amz_1"),
-        PriceResult(retailer: "Walmart",  price: "$289.95", shipping: "$5.99",  isBest: false, link: "", thumbnail: "", rating: 4.6, reviewCount: 3871,  title: "Nike Air Force 1 Low Men's Shoes",      snippet: "Save with everyday low prices and free 2-day shipping on eligible orders.",  productId: "mock_wmt_2"),
-        PriceResult(retailer: "Best Buy", price: "$299.99", shipping: "Free",   isBest: false, link: "", thumbnail: "", rating: 4.7, reviewCount: 1102,  title: "Nike Air Force 1 '07",                  snippet: "Expert advice and price match guarantee at Best Buy.",                       productId: "mock_bbuy_5"),
-        PriceResult(retailer: "eBay",     price: "$259.00", shipping: "$12.00", isBest: false, link: "", thumbnail: "", rating: nil, reviewCount: nil,   title: "Nike Air Force 1 Low (Used - Excellent)", snippet: nil,                                                                         productId: nil),
-        PriceResult(retailer: "Target",   price: "$319.99", shipping: "Free",   isBest: false, link: "", thumbnail: "", rating: 4.5, reviewCount: 918,   title: "Nike Air Force 1 Low Sneaker",          snippet: "Free shipping on orders over $35 or free same-day pickup.",                productId: "mock_tgt_3"),
+        PriceResult(retailer: "Amazon",   price: "$279.99", shipping: "Free",   isBest: true,  link: "", thumbnail: "", rating: 4.8, reviewCount: 12543, title: "Nike Air Force 1 Low White/White",         snippet: "Top-rated with fast Prime delivery. Highly rated by thousands of customers.", productId: "mock_amz_1",  extractedPrice: 279.99),
+        PriceResult(retailer: "Walmart",  price: "$289.95", shipping: "$5.99",  isBest: false, link: "", thumbnail: "", rating: 4.6, reviewCount: 3871,  title: "Nike Air Force 1 Low Men's Shoes",         snippet: "Save with everyday low prices and free 2-day shipping on eligible orders.",  productId: "mock_wmt_2",  extractedPrice: 289.95),
+        PriceResult(retailer: "Best Buy", price: "$299.99", shipping: "Free",   isBest: false, link: "", thumbnail: "", rating: 4.7, reviewCount: 1102,  title: "Nike Air Force 1 '07",                     snippet: "Expert advice and price match guarantee at Best Buy.",                       productId: "mock_bbuy_5", extractedPrice: 299.99),
+        PriceResult(retailer: "eBay",     price: "$259.00", shipping: "$12.00", isBest: false, link: "", thumbnail: "", rating: nil, reviewCount: nil,   title: "Nike Air Force 1 Low (Used - Excellent)",  snippet: nil,                                                                         productId: nil,           extractedPrice: 259.00),
+        PriceResult(retailer: "Target",   price: "$319.99", shipping: "Free",   isBest: false, link: "", thumbnail: "", rating: 4.5, reviewCount: 918,   title: "Nike Air Force 1 Low Sneaker",             snippet: "Free shipping on orders over $35 or free same-day pickup.",                productId: "mock_tgt_3",  extractedPrice: 319.99),
     ]
 }
 
-#Preview("Loaded — Precision") { NavigationStack { ResultsView() }.modelContainer(for: ScanRecord.self, inMemory: true) }
-#Preview("Loaded — Deep")      { NavigationStack { ResultsView(scanMode: .deep) }.modelContainer(for: ScanRecord.self, inMemory: true) }
-#Preview("Loading")            { NavigationStack { ResultsView(phase: .loading) }.modelContainer(for: ScanRecord.self, inMemory: true) }
-#Preview("Empty")              { NavigationStack { ResultsView(phase: .empty) }.modelContainer(for: ScanRecord.self, inMemory: true) }
-#Preview("Error")              { NavigationStack { ResultsView(phase: .error("Network connection lost.")) }.modelContainer(for: ScanRecord.self, inMemory: true) }
+private let previewContainer = try! ModelContainer(
+    for: Schema([ScanRecord.self, SavedItem.self]),
+    configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+)
+
+#Preview("Loaded — Precision") { NavigationStack { ResultsView() }.modelContainer(previewContainer) }
+#Preview("Loaded — Deep")      { NavigationStack { ResultsView(scanMode: .deep) }.modelContainer(previewContainer) }
+#Preview("Loading")            { NavigationStack { ResultsView(phase: .loading) }.modelContainer(previewContainer) }
+#Preview("Empty")              { NavigationStack { ResultsView(phase: .empty) }.modelContainer(previewContainer) }
+#Preview("Error")              { NavigationStack { ResultsView(phase: .error("Network connection lost.")) }.modelContainer(previewContainer) }

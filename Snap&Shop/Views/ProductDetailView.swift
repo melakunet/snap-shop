@@ -202,7 +202,9 @@ struct ProductDetailView: View {
 
     private func reviewsSection(_ reviews: ProductReviews) -> some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            reviewsHeader(reviews)
+            if reviews.rating > 0 || reviews.reviewCount > 0 {
+                reviewsHeader(reviews)
+            }
             if let bd = reviews.breakdown {
                 breakdownBars(bd)
             }
@@ -213,6 +215,24 @@ struct ProductDetailView: View {
                     if review.id != reviews.topReviews.last?.id {
                         Divider().overlay(Color.Brand.border)
                     }
+                }
+            } else if reviews.rating == 0 && reviews.reviewCount == 0 {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "text.bubble")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.Brand.textSecondary)
+                    Text("No review data available for this item.")
+                        .font(Typography.caption)
+                        .foregroundStyle(Color.Brand.textSecondary)
+                }
+            } else {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.Brand.textSecondary)
+                    Text("Review snippets are temporarily unavailable.")
+                        .font(Typography.caption)
+                        .foregroundStyle(Color.Brand.textSecondary)
                 }
             }
         }
@@ -319,22 +339,31 @@ struct ProductDetailView: View {
     private var reviewsControl: some View {
         switch reviewsPhase {
         case .idle:
-            Button { loadReviews() } label: {
-                Label("See reviews", systemImage: "text.bubble")
-                    .font(Typography.callout.weight(.semibold))
-                    .foregroundStyle(result.productId != nil ? Color.Brand.accent : Color.Brand.textSecondary)
+            if result.productId != nil {
+                Button { loadReviews() } label: {
+                    Label("See reviews", systemImage: "text.bubble")
+                        .font(Typography.callout.weight(.semibold))
+                        .foregroundStyle(Color.Brand.accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Spacing.md)
+                        .background(Color.Brand.accent.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Radius.md)
+                                .strokeBorder(Color.Brand.accent.opacity(0.3), lineWidth: 1)
+                        )
+                }
+            } else {
+                Label("Reviews not available for this retailer", systemImage: "text.bubble.slash")
+                    .font(Typography.caption)
+                    .foregroundStyle(Color.Brand.textSecondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Spacing.md)
-                    .background(Color.Brand.accent.opacity(result.productId != nil ? 0.1 : 0.05))
+                    .background(Color.Brand.surface)
                     .clipShape(RoundedRectangle(cornerRadius: Radius.md))
                     .overlay(
                         RoundedRectangle(cornerRadius: Radius.md)
-                            .strokeBorder(
-                                result.productId != nil
-                                    ? Color.Brand.accent.opacity(0.3)
-                                    : Color.Brand.border,
-                                lineWidth: 1
-                            )
+                            .strokeBorder(Color.Brand.border, lineWidth: 1)
                     )
             }
 
@@ -393,10 +422,7 @@ struct ProductDetailView: View {
     }
 
     private func loadReviews() {
-        guard let productId = result.productId else {
-            reviewsPhase = .failed("Reviews are not available for items from \(result.retailer).")
-            return
-        }
+        guard let productId = result.productId else { return }
         reviewsPhase = .loading
         Task {
             do {
@@ -407,7 +433,17 @@ struct ProductDetailView: View {
             } catch is CancellationError {
                 // view dismissed, no update needed
             } catch {
-                reviewsPhase = .failed(error.localizedDescription)
+                // Backend unavailable — surface whatever rating data we already have from the
+                // product card rather than showing a raw HTTP error to the user.
+                let fallback = ProductReviews(
+                    rating: result.rating ?? 0,
+                    reviewCount: result.reviewCount ?? 0,
+                    breakdown: nil,
+                    topReviews: []
+                )
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    reviewsPhase = .loaded(fallback)
+                }
             }
         }
     }

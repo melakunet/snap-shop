@@ -12,6 +12,8 @@ enum ScanMode {
 
 struct CameraView: View {
     @StateObject private var session = CameraSession()
+    @EnvironmentObject private var proStatus: ProStatus
+    @State private var showPaywall = false
     @State private var scanMode: ScanMode = .precision
     @State private var isScanning = false
     @State private var flashOn = false
@@ -121,6 +123,10 @@ struct CameraView: View {
             } message: {
                 Text("Copy a product link and try again.")
             }
+            .sheet(isPresented: $showPaywall) {
+                PaywallView()
+                    .environmentObject(proStatus)
+            }
     }
 
     private var mainStack: some View {
@@ -169,6 +175,12 @@ struct CameraView: View {
         }
         .onChange(of: selectedPickerItem) { _, newItem in
             guard let newItem else { return }
+            guard proStatus.isPro || QuotaManager.canScan() else {
+                selectedPickerItem = nil
+                showPaywall = true
+                return
+            }
+            if !proStatus.isPro { QuotaManager.recordScan() }
             Task {
                 do {
                     if let data = try await newItem.loadTransferable(type: Data.self) {
@@ -181,6 +193,11 @@ struct CameraView: View {
         }
         .onChange(of: selectedVideoItem) { _, newItem in
             guard let newItem else { return }
+            guard proStatus.isPro else {
+                selectedVideoItem = nil
+                showPaywall = true
+                return
+            }
             Task {
                 do {
                     if let video = try await newItem.loadTransferable(type: VideoTransferable.self) {
@@ -194,9 +211,16 @@ struct CameraView: View {
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.image]) { result in
             switch result {
             case .success(let url):
+                guard proStatus.isPro || QuotaManager.canScan() else {
+                    showPaywall = true
+                    return
+                }
                 guard url.startAccessingSecurityScopedResource() else { return }
                 defer { url.stopAccessingSecurityScopedResource() }
-                if let data = try? Data(contentsOf: url) { session.publishImage(data) }
+                if let data = try? Data(contentsOf: url) {
+                    if !proStatus.isPro { QuotaManager.recordScan() }
+                    session.publishImage(data)
+                }
             case .failure:
                 break
             }
@@ -207,6 +231,10 @@ struct CameraView: View {
         ) { result in
             switch result {
             case .success(let url):
+                guard proStatus.isPro else {
+                    showPaywall = true
+                    return
+                }
                 guard url.startAccessingSecurityScopedResource() else { return }
                 defer { url.stopAccessingSecurityScopedResource() }
                 let tempURL = FileManager.default.temporaryDirectory
@@ -510,8 +538,17 @@ struct CameraView: View {
 
                 Button {
                     if scanMode == .precision {
+                        guard proStatus.isPro || QuotaManager.canScan() else {
+                            showPaywall = true
+                            return
+                        }
+                        if !proStatus.isPro { QuotaManager.recordScan() }
                         session.capturePhoto(flashOn: flashOn)
                     } else {
+                        guard proStatus.isPro else {
+                            showPaywall = true
+                            return
+                        }
                         if session.isRecording {
                             session.stopRecording()
                         } else {
@@ -588,6 +625,11 @@ struct CameraView: View {
             showClipboardAlert = true
             return
         }
+        guard proStatus.isPro || QuotaManager.canScan() else {
+            showPaywall = true
+            return
+        }
+        if !proStatus.isPro { QuotaManager.recordScan() }
         pastedURL = url
         showResults = true
     }

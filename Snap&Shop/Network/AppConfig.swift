@@ -6,6 +6,9 @@ enum AppConfig {
     // producing https:///host in the plist, which we normalise below.
     // On "My Mac (Designed for iPad)" the $() substitution sometimes misfires and leaves
     // the value empty or unexpanded; the hardcoded fallback ensures the app never crashes.
+    /// Set to true only after adding iCloud capability + CloudKit entitlement (requires paid team).
+    static let iCloudSyncEnabled = false
+
     static let backendBaseURL: URL = {
         let fallback = URL(string: "https://snap-shop-api-dev.etefmelaku.workers.dev")!
         guard
