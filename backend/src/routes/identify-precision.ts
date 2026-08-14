@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { Env, Variables } from '../lib/schema'
 import { errorBody } from '../lib/errors'
 import { identifyWithGroq } from '../services/groq'
-import { lookupBarcode } from '../services/barcode'
+import { lookupBarcode, isISBN } from '../services/barcode'
 import { captureError } from '../lib/sentry'
 import {
   isPlantLike,
@@ -61,15 +61,26 @@ route.post('/', async (c) => {
     if (barcode) {
       const barcodeResult = await lookupBarcode(barcode, c.env)
       if (barcodeResult) {
+        const category = isISBN(barcode) ? 'book' : 'product'
         return c.json({
           brand: barcodeResult.brand,
           model: barcodeResult.name,
-          category: 'product',
+          category,
           distinguishing_features: [],
           confidence: barcodeResult.confidence,
           search_query: barcodeResult.search_query,
         })
       }
+      // Barcode provided but lookup returned nothing.
+      // ISBN barcodes point at a book label image — Groq cannot identify books from barcode art.
+      // Return a clear error so the user can search by title instead of getting hallucinated results.
+      if (isISBN(barcode)) {
+        return c.json(
+          errorBody('barcode_not_found', "Couldn't find this book — try searching by title or author."),
+          422,
+        )
+      }
+      // Non-ISBN: image may contain the actual product visually — fall through to Groq.
     }
 
     const imageBase64 = toBase64(await file.arrayBuffer())

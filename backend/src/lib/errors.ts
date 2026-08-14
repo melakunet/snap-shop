@@ -5,6 +5,7 @@ export type ErrorCode =
   | 'upstream_error'
   | 'no_products_found'
   | 'plant_unidentified'
+  | 'barcode_not_found'
   | 'internal'
 
 export function errorBody(code: ErrorCode, message: string) {

@@ -8,10 +8,12 @@ final class CameraSession: NSObject, ObservableObject {
     @Published var capturedVideoURL: URL?
     @Published var isCapturing = false
     @Published var isRecording = false
+    @Published var detectedBarcode: String? = nil
 
     let session = AVCaptureSession()
     private let photoOutput = AVCapturePhotoOutput()
     private let movieFileOutput = AVCaptureMovieFileOutput()
+    private let metadataOutput = AVCaptureMetadataOutput()
     private let sessionQueue = DispatchQueue(label: "com.snapshop.camera", qos: .userInitiated)
 
     override init() {
@@ -61,6 +63,14 @@ final class CameraSession: NSObject, ObservableObject {
             session.addOutput(movieFileOutput)
             movieFileOutput.maxRecordedDuration = CMTime(seconds: 10, preferredTimescale: 600)
         }
+        if session.canAddOutput(metadataOutput) {
+            session.addOutput(metadataOutput)
+            // Must be set AFTER adding to session so availableMetadataObjectTypes is populated
+            let supported = metadataOutput.availableMetadataObjectTypes
+            let wanted: [AVMetadataObject.ObjectType] = [.ean13, .ean8, .upce, .code128, .qr]
+            metadataOutput.metadataObjectTypes = wanted.filter { supported.contains($0) }
+            metadataOutput.setMetadataObjectsDelegate(self, queue: .main)
+        }
         session.commitConfiguration()
     }
 
@@ -96,6 +106,10 @@ final class CameraSession: NSObject, ObservableObject {
 
     func publishImage(_ data: Data) {
         DispatchQueue.main.async { self.capturedImageData = data }
+    }
+
+    func clearDetectedBarcode() {
+        detectedBarcode = nil
     }
 
     // MARK: — Deep capture
@@ -135,6 +149,24 @@ extension CameraSession: AVCapturePhotoCaptureDelegate {
         DispatchQueue.main.async {
             self.isCapturing = false
             self.capturedImageData = data
+        }
+    }
+}
+
+// MARK: — Barcode delegate
+
+extension CameraSession: AVCaptureMetadataOutputObjectsDelegate {
+    nonisolated func metadataOutput(
+        _: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from _: AVCaptureConnection
+    ) {
+        guard let obj = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+              let value = obj.stringValue, !value.isEmpty else { return }
+        DispatchQueue.main.async {
+            if self.detectedBarcode != value {
+                self.detectedBarcode = value
+            }
         }
     }
 }

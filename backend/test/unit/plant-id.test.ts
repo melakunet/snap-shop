@@ -163,6 +163,39 @@ describe('isPlantLike', () => {
       distinguishing_features: ['leaf-shaped handle'],
     }))).toBe(false)
   })
+
+  // Plant-adjacent commerce categories
+  it('returns true for category "seeds"', () => {
+    expect(isPlantLike(makeIdentify({ category: 'seeds' }))).toBe(true)
+  })
+
+  it('returns true for category "garden seeds"', () => {
+    expect(isPlantLike(makeIdentify({ category: 'garden seeds' }))).toBe(true)
+  })
+
+  it('returns true for category "seed pod"', () => {
+    expect(isPlantLike(makeIdentify({ category: 'seed pod' }))).toBe(true)
+  })
+
+  it('returns true for category "flower bulb"', () => {
+    expect(isPlantLike(makeIdentify({ category: 'flower bulb' }))).toBe(true)
+  })
+
+  it('returns true for category "perennial plant"', () => {
+    expect(isPlantLike(makeIdentify({ category: 'perennial plant' }))).toBe(true)
+  })
+
+  it('returns true for category "annual flower"', () => {
+    expect(isPlantLike(makeIdentify({ category: 'annual flower' }))).toBe(true)
+  })
+
+  it('returns true for category "cherry blossom"', () => {
+    expect(isPlantLike(makeIdentify({ category: 'cherry blossom' }))).toBe(true)
+  })
+
+  it('returns true for category "plant cutting"', () => {
+    expect(isPlantLike(makeIdentify({ category: 'plant cutting' }))).toBe(true)
+  })
 })
 
 // ── isSpecificPlantQuery ──────────────────────────────────────────────────────

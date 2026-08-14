@@ -9,6 +9,7 @@ struct PaywallView: View {
     @State private var isPurchasing = false
     @State private var isRestoring = false
     @State private var isLoading = true
+    @State private var storeUnavailable = false
     @State private var errorMessage: String? = nil
 
     private var selectedProduct: Product? {
@@ -115,10 +116,42 @@ struct PaywallView: View {
 
     private var planPicker: some View {
         VStack(spacing: Spacing.sm) {
-            ForEach(products, id: \.id) { product in
-                planCard(product)
+            if storeUnavailable {
+                storeUnavailableRow
+            } else {
+                ForEach(products, id: \.id) { product in
+                    planCard(product)
+                }
             }
         }
+    }
+
+    private var storeUnavailableRow: some View {
+        VStack(spacing: Spacing.md) {
+            Text("Store unavailable — check your connection and try again")
+                .font(Typography.callout)
+                .foregroundStyle(Color.Brand.textSecondary)
+                .multilineTextAlignment(.center)
+            Button {
+                Task { await loadProducts() }
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    if isLoading {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .tint(Color.Brand.accent)
+                    }
+                    Text(isLoading ? "Retrying…" : "Retry")
+                        .font(Typography.callout.weight(.semibold))
+                        .foregroundStyle(Color.Brand.accent)
+                }
+            }
+            .disabled(isLoading)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(Spacing.xl)
+        .background(Color.Brand.surface)
+        .clipShape(RoundedRectangle(cornerRadius: Radius.md))
     }
 
     private func planCard(_ product: Product) -> some View {
@@ -172,24 +205,32 @@ struct PaywallView: View {
     // MARK: — CTA
 
     private var ctaButton: some View {
-        VStack(spacing: Spacing.sm) {
+        let busy = isPurchasing || isLoading
+        let unavail = storeUnavailable && !isLoading
+        return VStack(spacing: Spacing.sm) {
             Button {
                 Task { await purchase() }
             } label: {
                 ZStack {
-                    Text(selectedID == ProStatus.annualID ? "Start Free Trial" : "Subscribe Now")
-                        .opacity(isPurchasing ? 0 : 1)
-                    if isPurchasing { ProgressView().tint(Color.Brand.accentOn) }
+                    if busy {
+                        ProgressView().tint(unavail ? Color.Brand.textSecondary : Color.Brand.accentOn)
+                    } else {
+                        Text(selectedID == ProStatus.annualID ? "Start Free Trial" : "Subscribe Now")
+                    }
                 }
                 .font(Typography.callout.weight(.semibold))
-                .foregroundStyle(Color.Brand.accentOn)
+                .foregroundStyle(unavail ? Color.Brand.textSecondary : Color.Brand.accentOn)
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
-                .background(Color.Brand.accent.opacity(isPurchasing ? 0.7 : 1.0))
+                .background(
+                    unavail
+                        ? Color.Brand.surfaceAlt
+                        : Color.Brand.accent.opacity(busy ? 0.7 : 1.0)
+                )
                 .clipShape(RoundedRectangle(cornerRadius: Radius.md))
             }
-            .disabled(isPurchasing || selectedProduct == nil)
-            .animation(.easeInOut(duration: 0.15), value: isPurchasing)
+            .disabled(busy || selectedProduct == nil)
+            .animation(.easeInOut(duration: 0.15), value: busy)
 
             if let error = errorMessage {
                 Text(error)
@@ -222,12 +263,26 @@ struct PaywallView: View {
 
     private func loadProducts() async {
         isLoading = true
+        storeUnavailable = false
+        errorMessage = nil
+        let requestedIDs = [ProStatus.monthlyID, ProStatus.annualID]
+        #if DEBUG
+        print("[PaywallView] requesting product IDs: \(requestedIDs.joined(separator: ", "))")
+        #endif
         do {
-            let loaded = try await Product.products(for: [ProStatus.monthlyID, ProStatus.annualID])
-            // Annual first in the list
-            products = loaded.sorted { $0.id == ProStatus.annualID && $1.id != ProStatus.annualID }
+            let loaded = try await Product.products(for: requestedIDs)
+            #if DEBUG
+            print("[PaywallView] loaded \(loaded.count) product(s): \(loaded.map(\.id))")
+            #endif
+            if loaded.isEmpty {
+                storeUnavailable = true
+            } else {
+                // Annual first in the list
+                products = loaded.sorted { $0.id == ProStatus.annualID && $1.id != ProStatus.annualID }
+            }
         } catch {
-            errorMessage = "Could not load products: \(error.localizedDescription)"
+            storeUnavailable = true
+            errorMessage = error.localizedDescription
         }
         isLoading = false
     }

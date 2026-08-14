@@ -73,7 +73,8 @@ enum BackendClient {
     // MARK: — Precision
 
     /// POST multipart/form-data to /identify/precision.
-    static func identifyPrecision(imageData: Data) async throws -> IdentifyResult {
+    /// Pass `barcode` to skip Groq vision and hit the barcode fast-path on the backend.
+    static func identifyPrecision(imageData: Data, barcode: String? = nil) async throws -> IdentifyResult {
         let url = AppConfig.backendBaseURL.appending(path: "/identify/precision")
         let boundary = UUID().uuidString
         var request = makeRequest(url: url, method: "POST")
@@ -81,7 +82,7 @@ enum BackendClient {
             "multipart/form-data; boundary=\(boundary)",
             forHTTPHeaderField: "Content-Type"
         )
-        request.httpBody = buildMultipart(imageData: imageData, boundary: boundary)
+        request.httpBody = buildMultipart(imageData: imageData, barcode: barcode, boundary: boundary)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         try checkHTTP(response, data)
@@ -104,8 +105,8 @@ enum BackendClient {
 
     /// Full precision scan: identify image and run OCR in parallel, enrich query, then fetch prices.
     /// Returns (product, []) when plant detection suppresses shopping (dangerous plant or no query).
-    static func scan(imageData: Data) async throws -> (IdentifyResult, [ShopItem]) {
-        async let productResult = identifyPrecision(imageData: imageData)
+    static func scan(imageData: Data, barcode: String? = nil) async throws -> (IdentifyResult, [ShopItem]) {
+        async let productResult = identifyPrecision(imageData: imageData, barcode: barcode)
         async let ocrText = ImageCropper.recognizeText(in: imageData)
 
         let product = try await productResult
@@ -315,7 +316,7 @@ enum BackendClient {
         return body
     }
 
-    private static func buildMultipart(imageData: Data, boundary: String) -> Data {
+    private static func buildMultipart(imageData: Data, barcode: String? = nil, boundary: String) -> Data {
         var body = Data()
         func append(_ string: String) {
             if let d = string.data(using: .utf8) { body.append(d) }
@@ -324,7 +325,14 @@ enum BackendClient {
         append("Content-Disposition: form-data; name=\"image\"; filename=\"scan.jpg\"\r\n")
         append("Content-Type: image/jpeg\r\n\r\n")
         body.append(imageData)
-        append("\r\n--\(boundary)--\r\n")
+        append("\r\n")
+        if let barcode, !barcode.isEmpty {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"barcode\"\r\n\r\n")
+            append(barcode)
+            append("\r\n")
+        }
+        append("--\(boundary)--\r\n")
         return body
     }
 

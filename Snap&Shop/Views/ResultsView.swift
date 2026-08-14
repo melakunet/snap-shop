@@ -46,6 +46,7 @@ struct ResultsView: View {
     var hint: String?
     var productPageURL: URL?
     var uploadData: Data?           // pre-cropped payload from CropSheet; skips prepareForUpload
+    var barcode: String?            // live-detected barcode; skips Groq vision on the backend
     @Binding var prefillQuery: String
     @State private var phase: ResultsPhase
     @State private var videoPlayer: AVPlayer?
@@ -78,6 +79,7 @@ struct ResultsView: View {
         hint: String? = nil,
         productPageURL: URL? = nil,
         uploadData: Data? = nil,
+        barcode: String? = nil,
         prefillQuery: Binding<String> = .constant(""),
         phase: ResultsPhase = .loaded(PriceResult.samples)
     ) {
@@ -88,6 +90,7 @@ struct ResultsView: View {
         self.hint = hint
         self.productPageURL = productPageURL
         self.uploadData = uploadData
+        self.barcode = barcode
         _prefillQuery = prefillQuery
         let autoStart = imageData != nil || videoURL != nil || textQuery != nil || productPageURL != nil
         _phase = State(initialValue: autoStart ? .loading : phase)
@@ -137,7 +140,7 @@ struct ResultsView: View {
                     } else {
                         toUpload = await ImageCropper.prepareForUpload(data: data)
                     }
-                    let (product, items) = try await BackendClient.scan(imageData: toUpload)
+                    let (product, items) = try await BackendClient.scan(imageData: toUpload, barcode: barcode)
                     productResult = product
                     shopItems = items
                 } else if let url = videoURL {
@@ -452,20 +455,27 @@ struct ResultsView: View {
         .foregroundStyle(badgeColor)
     }
 
+    private var isBarcodeResult: Bool {
+        barcode != nil && (identifyResult?.confidence ?? 0) >= 0.99
+    }
+
     private var badgeIcon: String {
+        if isBarcodeResult { return "barcode.viewfinder" }
         if productPageURL != nil { return "link" }
         if textQuery != nil { return "magnifyingglass" }
         return scanMode == .precision ? "camera.aperture" : "video.fill"
     }
 
     private var badgeLabel: String {
+        if isBarcodeResult { return "Barcode scan ⚡" }
         if productPageURL != nil { return "Link Scan" }
         if textQuery != nil { return "Text Search" }
         return scanMode == .precision ? "Precision Scan" : "Deep Scan"
     }
 
     private var badgeColor: Color {
-        scanMode == .deep && productPageURL == nil && textQuery == nil
+        if isBarcodeResult { return Color.Brand.success }
+        return scanMode == .deep && productPageURL == nil && textQuery == nil
             ? Color.Brand.scanDeep : Color.Brand.accent
     }
 

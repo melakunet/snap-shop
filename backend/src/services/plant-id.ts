@@ -51,6 +51,8 @@ const PLANT_CAT_KEYWORDS = [
   'fern', 'moss', 'vine', 'shrub', 'bush', 'herb', 'weed', 'houseplant',
   'succulent', 'cactus', 'tree', 'wildflower', 'foliage', 'vegetation',
   'grass', 'algae', 'sprout', 'seedling', 'botanical', 'garden',
+  // Plant-adjacent commerce categories (seed packets, bulbs, perennials, etc.)
+  'seed', 'bulb', 'perennial', 'annual', 'blossom', 'pod', 'cutting',
 ]
 
 const PLANT_FEATURE_WORDS = [

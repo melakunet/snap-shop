@@ -34,6 +34,8 @@ struct CameraView: View {
     @State private var prefillQuery = ""
     @State private var showCropSheet = false
     @State private var pendingUploadData: Data? = nil
+    @State private var isBarcodeCapture = false
+    @State private var barcodeForCapture: String? = nil
     @State private var transcriptVideoPlayer: AVPlayer? = nil
     @State private var frameFromVideo: Data? = nil
     @State private var showVideoFrameCrop = false
@@ -111,7 +113,7 @@ struct CameraView: View {
                 } else if let videoURL = session.capturedVideoURL {
                     ResultsView(scanMode: .deep, videoURL: videoURL, hint: voiceHint)
                 } else if let data = session.capturedImageData {
-                    ResultsView(scanMode: scanMode, imageData: data, uploadData: pendingUploadData)
+                    ResultsView(scanMode: scanMode, imageData: data, uploadData: pendingUploadData, barcode: barcodeForCapture)
                 } else if !submittedQuery.isEmpty {
                     ResultsView(textQuery: submittedQuery)
                 } else if let url = pastedURL {
@@ -154,7 +156,14 @@ struct CameraView: View {
                 }
 
                 Spacer()
-                viewfinderContainer
+                VStack(spacing: Spacing.md) {
+                    viewfinderContainer
+                    if scanMode == .precision, session.detectedBarcode != nil {
+                        barcodeFoundChip
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.spring(duration: 0.3), value: session.detectedBarcode)
                 Spacer()
 
                 hintLabel
@@ -247,7 +256,14 @@ struct CameraView: View {
             }
         }
         .onChange(of: session.capturedImageData) { _, newData in
-            if newData != nil { showCropSheet = true }
+            guard newData != nil else { return }
+            if isBarcodeCapture {
+                // Skip the crop sheet — image is just for the request payload; barcode drives the lookup
+                isBarcodeCapture = false
+                showResults = true
+            } else {
+                showCropSheet = true
+            }
         }
         .onChange(of: session.capturedVideoURL) { _, url in
             guard let url else { return }
@@ -266,6 +282,8 @@ struct CameraView: View {
                 pastedURL = nil
                 pendingUploadData = nil
                 frameFromVideo = nil
+                barcodeForCapture = nil
+                session.clearDetectedBarcode()
                 if !prefillQuery.isEmpty {
                     searchQuery = prefillQuery
                     prefillQuery = ""
@@ -341,6 +359,36 @@ struct CameraView: View {
             .background(active ? modeColor : .clear)
             .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
         }
+    }
+
+    // MARK: — Barcode chip
+
+    private var barcodeFoundChip: some View {
+        Button {
+            guard let code = session.detectedBarcode else { return }
+            guard proStatus.isPro || QuotaManager.canScan() else {
+                showPaywall = true
+                return
+            }
+            if !proStatus.isPro { QuotaManager.recordScan() }
+            barcodeForCapture = code
+            isBarcodeCapture = true
+            session.capturePhoto(flashOn: false)
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "barcode.viewfinder")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Barcode found — tap to price")
+                    .font(Typography.caption.weight(.semibold))
+            }
+            .foregroundStyle(Color.Brand.accentOn)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.sm)
+            .background(Color.Brand.accent)
+            .clipShape(Capsule())
+            .shadow(color: Color.Brand.accent.opacity(0.4), radius: 6, y: 3)
+        }
+        .disabled(session.isCapturing)
     }
 
     // MARK: — Viewfinder
