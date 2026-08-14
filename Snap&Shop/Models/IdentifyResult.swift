@@ -10,4 +10,5 @@ struct IdentifyResult: Codable {
     let confidence: Double
     let searchQuery: String               // backend: search_query
     let imageURL: String?                 // backend: image_url — populated by /identify/url only
+    let plant: PlantResult?               // backend: plant — present only for plant-like scans
 }

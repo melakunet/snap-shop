@@ -45,45 +45,56 @@ export async function fetchShoppingResults(
 ): Promise<ShopItem[]> {
   if (!env.SERPAPI_KEY) return mockResults(query, retailerWhitelist)
 
-  const params = new URLSearchParams({
-    engine: 'google_shopping',
-    q: query,
-    api_key: env.SERPAPI_KEY,
-    num: '40', // fetch extra before whitelist filtering
-  })
+  try {
+    const params = new URLSearchParams({
+      engine: 'google_shopping',
+      q: query,
+      api_key: env.SERPAPI_KEY,
+      num: '40', // fetch extra before whitelist filtering
+    })
 
-  const res = await fetch(`${SERPAPI_URL}?${params}`)
+    const res = await fetch(`${SERPAPI_URL}?${params}`)
 
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`SerpAPI ${res.status}: ${body.slice(0, 300)}`)
+    if (!res.ok) {
+      const body = await res.text()
+      console.error(`[serpapi] SerpAPI ${res.status}: ${body.slice(0, 300)} — falling back to mock`)
+      return mockResults(query, retailerWhitelist)
+    }
+
+    const data = await res.json() as SerpAPIResponse
+
+    if (data.error) {
+      console.error(`[serpapi] SerpAPI error: ${data.error} — falling back to mock`)
+      return mockResults(query, retailerWhitelist)
+    }
+
+    const results = data.shopping_results ?? []
+
+    if (results.length === 0) return mockResults(query, retailerWhitelist)
+
+    // Case-insensitive whitelist filter (empty whitelist = return all)
+    const normalized = retailerWhitelist.map((r) => r.toLowerCase())
+    const filtered = normalized.length === 0
+      ? results
+      : results.filter((r) =>
+        r.source && normalized.some((w) => r.source!.toLowerCase().includes(w))
+      )
+
+    return filtered.slice(0, 10).map((r) => ({
+      price: r.price ?? '',
+      extracted_price: r.extracted_price ?? 0,
+      delivery: r.delivery ?? '',
+      source: r.source ?? '',
+      link: r.link ?? r.product_link ?? '',
+      thumbnail: r.thumbnail ?? '',
+      ...(r.rating != null ? { rating: r.rating } : {}),
+      ...(r.reviews != null ? { review_count: r.reviews } : {}),
+      ...(r.title ? { title: r.title } : {}),
+      ...(r.snippet ? { snippet: r.snippet } : {}),
+      ...(r.product_id ? { product_id: r.product_id } : {}),
+    }))
+  } catch (err) {
+    console.error('[serpapi] unexpected error — falling back to mock:', err)
+    return mockResults(query, retailerWhitelist)
   }
-
-  const data = await res.json() as SerpAPIResponse
-
-  if (data.error) throw new Error(`SerpAPI error: ${data.error}`)
-
-  const results = data.shopping_results ?? []
-
-  // Case-insensitive whitelist filter (empty whitelist = return all)
-  const normalized = retailerWhitelist.map((r) => r.toLowerCase())
-  const filtered = normalized.length === 0
-    ? results
-    : results.filter((r) =>
-      r.source && normalized.some((w) => r.source!.toLowerCase().includes(w))
-    )
-
-  return filtered.slice(0, 10).map((r) => ({
-    price: r.price ?? '',
-    extracted_price: r.extracted_price ?? 0,
-    delivery: r.delivery ?? '',
-    source: r.source ?? '',
-    link: r.link ?? r.product_link ?? '',
-    thumbnail: r.thumbnail ?? '',
-    ...(r.rating != null ? { rating: r.rating } : {}),
-    ...(r.reviews != null ? { review_count: r.reviews } : {}),
-    ...(r.title ? { title: r.title } : {}),
-    ...(r.snippet ? { snippet: r.snippet } : {}),
-    ...(r.product_id ? { product_id: r.product_id } : {}),
-  }))
 }

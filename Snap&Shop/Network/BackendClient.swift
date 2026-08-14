@@ -6,12 +6,14 @@ enum BackendError: Error, LocalizedError {
     case httpError(Int, String)
     case noProductsFound(String)
     case decodingError(Error)
+    case plantUnidentified(String)
 
     var errorDescription: String? {
         switch self {
         case .httpError(let code, let body): "HTTP \(code): \(body)"
         case .noProductsFound(let msg): msg
         case .decodingError(let err): "Decode error: \(err.localizedDescription)"
+        case .plantUnidentified(let msg): msg
         }
     }
 }
@@ -101,13 +103,16 @@ enum BackendClient {
     }
 
     /// Full precision scan: identify image and run OCR in parallel, enrich query, then fetch prices.
+    /// Returns (product, []) when plant detection suppresses shopping (dangerous plant or no query).
     static func scan(imageData: Data) async throws -> (IdentifyResult, [ShopItem]) {
         async let productResult = identifyPrecision(imageData: imageData)
         async let ocrText = ImageCropper.recognizeText(in: imageData)
 
         let product = try await productResult
         let text = await ocrText
-        let query = enrichedQuery(base: product.searchQuery, ocr: text)
+        let base = product.searchQuery.trimmingCharacters(in: .whitespaces)
+        guard !base.isEmpty else { return (product, []) }  // dangerous plant / suppressed
+        let query = enrichedQuery(base: base, ocr: text)
         #if DEBUG
         if !text.isEmpty {
             print("[OCR] extracted: \"\(text)\"")
@@ -148,10 +153,13 @@ enum BackendClient {
     }
 
     /// Full deep scan: extract keyframes, identify, fetch prices.
+    /// Returns (product, []) when plant detection suppresses shopping.
     static func scanDeep(videoURL: URL, hint: String? = nil) async throws -> (IdentifyResult, [ShopItem]) {
         let frames = try await extractKeyframes(from: videoURL, count: 8)
         let product = try await identifyDeep(frames: frames, hint: hint)
-        let prices = try await shop(query: product.searchQuery)
+        let q = product.searchQuery.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return (product, []) }
+        let prices = try await shop(query: q)
         return (product, prices)
     }
 
@@ -349,10 +357,13 @@ enum BackendClient {
         guard (200..<300).contains(http.statusCode) else {
             if http.statusCode == 422 {
                 struct ErrEnvelope: Decodable {
-                    struct Inner: Decodable { let message: String }
+                    struct Inner: Decodable { let code: String?; let message: String }
                     let error: Inner
                 }
                 if let env = try? JSONDecoder().decode(ErrEnvelope.self, from: data) {
+                    if env.error.code == "plant_unidentified" {
+                        throw BackendError.plantUnidentified(env.error.message)
+                    }
                     throw BackendError.noProductsFound(env.error.message)
                 }
             }

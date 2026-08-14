@@ -4,6 +4,14 @@ import { errorBody } from '../lib/errors'
 import { identifyWithGemini } from '../services/gemini'
 import type { FrameInput } from '../services/gemini'
 import { captureError } from '../lib/sentry'
+import {
+  isPlantLike,
+  identifyPlantSpecies,
+  shapePlantResponse,
+  isSpecificPlantQuery,
+  SAFETY_NOTE,
+  shouldAddSafetyNote,
+} from '../services/plant-id'
 
 const route = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -22,6 +30,7 @@ function toBase64(buf: ArrayBuffer): string {
 }
 
 // POST /identify/deep — Gemini Vision (2.5 Flash, escalates to 2.5 Pro on low confidence)
+// Plant-like results trigger a Groq plant-specialist second pass on the best frame.
 route.post('/', async (c) => {
   let formData: FormData
   try {
@@ -69,16 +78,60 @@ route.post('/', async (c) => {
       )
     }
 
-    // Pick highest-confidence item and return as IdentifyResult (without frame_index)
+    // Pick highest-confidence item
     const best = items.reduce((a, b) => (a.confidence >= b.confidence ? a : b))
-    return c.json({
+    const baseResult = {
       brand: best.brand,
       model: best.model,
       category: best.category,
       distinguishing_features: best.distinguishing_features,
       confidence: best.confidence,
       search_query: best.search_query,
-    })
+    }
+
+    // Plant specialist pass — uses the best frame
+    if (isPlantLike(baseResult)) {
+      const bestFrame = frames[best.frame_index] ?? frames[0]
+      const specialist = await identifyPlantSpecies(bestFrame.base64, bestFrame.mediaType, c.env)
+
+      if (!specialist) {
+        // GROQ_API_KEY absent or parse failed — return plain Gemini result
+        return c.json(baseResult)
+      }
+
+      if (specialist.common_name.toLowerCase() === 'unknown') {
+        return c.json(
+          errorBody(
+            'plant_unidentified',
+            "Couldn't determine the species — try a Deep scan or frame the plant closer. Never eat or touch unfamiliar plants based on a guess.",
+          ),
+          422,
+        )
+      }
+
+      const plantPayload = shapePlantResponse(specialist)
+      const isDangerous = !!plantPayload.warning
+      const needsNote = shouldAddSafetyNote(specialist.hazard_signals)
+
+      const finalQuery = isDangerous
+        ? ''
+        : isSpecificPlantQuery(baseResult.search_query)
+          ? baseResult.search_query
+          : `${specialist.common_name.toLowerCase()} plant`
+
+      if (needsNote && !isDangerous) {
+        plantPayload.safety_note = SAFETY_NOTE
+      }
+
+      return c.json({
+        ...baseResult,
+        confidence: specialist.confidence,
+        search_query: finalQuery,
+        plant: plantPayload,
+      })
+    }
+
+    return c.json(baseResult)
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err))
     await captureError(c.env.SENTRY_DSN, {

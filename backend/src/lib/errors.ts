@@ -4,6 +4,7 @@ export type ErrorCode =
   | 'invalid_input'
   | 'upstream_error'
   | 'no_products_found'
+  | 'plant_unidentified'
   | 'internal'
 
 export function errorBody(code: ErrorCode, message: string) {

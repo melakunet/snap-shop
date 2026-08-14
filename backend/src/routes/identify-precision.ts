@@ -4,6 +4,14 @@ import { errorBody } from '../lib/errors'
 import { identifyWithGroq } from '../services/groq'
 import { lookupBarcode } from '../services/barcode'
 import { captureError } from '../lib/sentry'
+import {
+  isPlantLike,
+  identifyPlantSpecies,
+  shapePlantResponse,
+  isSpecificPlantQuery,
+  SAFETY_NOTE,
+  shouldAddSafetyNote,
+} from '../services/plant-id'
 
 const route = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -21,7 +29,7 @@ function toBase64(buf: ArrayBuffer): string {
 }
 
 // POST /identify/precision
-// Provider chain: barcode (if provided) → Groq Llama 4 Scout
+// Provider chain: barcode (if provided) → Groq vision → plant specialist (plant-like only)
 route.post('/', async (c) => {
   let formData: FormData
   try {
@@ -66,14 +74,65 @@ route.post('/', async (c) => {
 
     const imageBase64 = toBase64(await file.arrayBuffer())
 
-    // Step 2 — Groq Llama 4 Scout
+    // Step 2 — Groq general vision
     const groqResult = await identifyWithGroq(imageBase64, file.type, c.env)
-    if (groqResult) return c.json(groqResult)
+    if (!groqResult) {
+      return c.json(
+        errorBody('no_products_found', "Couldn't identify this product — try getting closer or cropping tighter"),
+        422,
+      )
+    }
 
-    return c.json(
-      errorBody('no_products_found', "Couldn't identify this product — try getting closer or cropping tighter"),
-      422,
-    )
+    // Step 3 — Plant specialist pass (fires only for plant-like results)
+    if (isPlantLike(groqResult)) {
+      const specialist = await identifyPlantSpecies(imageBase64, file.type, c.env)
+
+      if (!specialist) {
+        // GROQ_API_KEY absent or parse failed both attempts — return plain result
+        return c.json(groqResult)
+      }
+
+      // Unknown species — honest 422, never fall through to shopping
+      if (specialist.common_name.toLowerCase() === 'unknown') {
+        return c.json(
+          errorBody(
+            'plant_unidentified',
+            "Couldn't determine the species — try a Deep scan or frame the plant closer. Never eat or touch unfamiliar plants based on a guess.",
+          ),
+          422,
+        )
+      }
+
+      const plantPayload = shapePlantResponse(specialist)
+      const isDangerous = !!plantPayload.warning
+      const needsNote = shouldAddSafetyNote(specialist.hazard_signals)
+
+      // Dangerous plants: suppress shopping (clear search_query)
+      // Safe plants: allow shopping only when the query is species-specific
+      let finalQuery = isDangerous
+        ? ''
+        : isSpecificPlantQuery(groqResult.search_query)
+          ? groqResult.search_query
+          : `${specialist.common_name.toLowerCase()} plant`
+
+      // Extra safety note for berry/mushroom hazard signals even on non-danger-listed plants
+      if (needsNote && !isDangerous) {
+        plantPayload.safety_note = SAFETY_NOTE
+      }
+
+      return c.json({
+        brand: groqResult.brand,
+        model: groqResult.model,
+        category: groqResult.category,
+        distinguishing_features: groqResult.distinguishing_features,
+        confidence: specialist.confidence,
+        search_query: finalQuery,
+        plant: plantPayload,
+      })
+    }
+
+    // Non-plant: return Groq result unchanged
+    return c.json(groqResult)
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err))
     console.error(`[precision] caught error: ${error.message}`)

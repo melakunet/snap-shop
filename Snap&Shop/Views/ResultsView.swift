@@ -35,6 +35,7 @@ enum ResultsPhase {
     case loaded([PriceResult])
     case empty
     case error(String)
+    case plantUnidentified(String)
 }
 
 struct ResultsView: View {
@@ -156,7 +157,9 @@ struct ResultsView: View {
                 }
 
                 let priceResults = mapToPriceResults(shopItems)
-                if priceResults.isEmpty {
+                // For plant scans with no shopping results, still enter loaded state
+                // so the species card and warning card render (productResult?.plant != nil).
+                if priceResults.isEmpty && productResult?.plant == nil {
                     phase = .empty
                 } else {
                     phase = .loaded(priceResults)
@@ -172,7 +175,11 @@ struct ResultsView: View {
             } catch is CancellationError {
                 // User navigated away before the response arrived — no UI update needed.
             } catch {
-                phase = .error(error.localizedDescription)
+                if let be = error as? BackendError, case .plantUnidentified(let msg) = be {
+                    phase = .plantUnidentified(msg)
+                } else {
+                    phase = .error(error.localizedDescription)
+                }
             }
         }
         .onChange(of: sortMode) { _, _ in
@@ -212,16 +219,27 @@ struct ResultsView: View {
             emptyView
         case .error(let msg):
             errorView(msg)
+        case .plantUnidentified(let msg):
+            plantUnidentifiedView(msg)
         }
     }
 
     // MARK: — Persistence
 
+    private func productName(from product: IdentifyResult) -> String {
+        if let plant = product.plant {
+            let cn = plant.commonName.trimmingCharacters(in: .whitespaces)
+            if !cn.isEmpty && cn.lowercased() != "unknown" { return cn.capitalized }
+            return "Unidentified plant"
+        }
+        let parts = [product.brand, product.model].filter { !$0.isEmpty }
+        return parts.isEmpty ? product.category.capitalized : parts.joined(separator: " ")
+    }
+
     private func saveScan(product: IdentifyResult, items: [ShopItem]) {
-        let name = [product.brand, product.model].filter { !$0.isEmpty }.joined(separator: " ")
         let lowestPrice = items.min(by: { $0.extractedPrice < $1.extractedPrice })?.extractedPrice ?? 0
         let record = ScanRecord(
-            productName: name.isEmpty ? product.category.capitalized : name,
+            productName: productName(from: product),
             mode: scanMode == .precision ? "precision" : "deep",
             thumbnailData: downsampleImageData(imageData, maxDimension: 120),
             lowestPrice: lowestPrice,
@@ -231,11 +249,10 @@ struct ResultsView: View {
     }
 
     private func saveScanDeep(product: IdentifyResult, items: [ShopItem], videoURL: URL) async {
-        let name = [product.brand, product.model].filter { !$0.isEmpty }.joined(separator: " ")
         let lowestPrice = items.min(by: { $0.extractedPrice < $1.extractedPrice })?.extractedPrice ?? 0
         let thumbnailData = await BackendClient.extractThumbnail(from: videoURL)
         let record = ScanRecord(
-            productName: name.isEmpty ? product.category.capitalized : name,
+            productName: productName(from: product),
             mode: "deep",
             thumbnailData: thumbnailData,
             lowestPrice: lowestPrice,
@@ -306,12 +323,28 @@ struct ResultsView: View {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 productHeader
                     .padding(.horizontal, Spacing.xl)
-                sortToggle
-                    .padding(.horizontal, Spacing.xl)
-                VStack(spacing: Spacing.sm) {
-                    ForEach(results) { productCard($0) }
+
+                // Plant species + warning cards shown before shopping results
+                if let plant = identifyResult?.plant {
+                    plantSpeciesCard(plant)
+                        .padding(.horizontal, Spacing.xl)
+                    if let warning = plant.warning {
+                        plantWarningCard(warning, safetyNote: plant.safetyNote)
+                            .padding(.horizontal, Spacing.xl)
+                    } else if let note = plant.safetyNote {
+                        plantSafetyNoteView(note)
+                            .padding(.horizontal, Spacing.xl)
+                    }
                 }
-                .padding(.horizontal, Spacing.xl)
+
+                if !results.isEmpty {
+                    sortToggle
+                        .padding(.horizontal, Spacing.xl)
+                    VStack(spacing: Spacing.sm) {
+                        ForEach(results) { productCard($0) }
+                    }
+                    .padding(.horizontal, Spacing.xl)
+                }
             }
             .padding(.top, Spacing.xl)
             .padding(.bottom, Spacing.xxxl)
@@ -567,6 +600,183 @@ struct ResultsView: View {
         .padding(.vertical, 2)
         .background(Color.Brand.success)
         .clipShape(Capsule())
+    }
+
+    // MARK: — Plant cards
+
+    private func plantSpeciesCard(_ plant: PlantResult) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "leaf.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color.Brand.success)
+                VStack(alignment: .leading, spacing: 2) {
+                    let cn = plant.commonName.trimmingCharacters(in: .whitespaces)
+                    Text(cn.isEmpty ? "Plant" : cn.capitalized)
+                        .font(Typography.headline)
+                        .foregroundStyle(Color.Brand.textPrimary)
+                    if !plant.latinName.isEmpty {
+                        Text(plant.latinName)
+                            .font(Typography.caption.italic())
+                            .foregroundStyle(Color.Brand.textSecondary)
+                    }
+                }
+                Spacer()
+                plantConfidenceBadge(plant.confidence)
+            }
+            if !plant.featuresObserved.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text("Observed features")
+                        .font(Typography.caption.weight(.semibold))
+                        .foregroundStyle(Color.Brand.textSecondary)
+                    ForEach(plant.featuresObserved, id: \.self) { feat in
+                        HStack(spacing: Spacing.xs) {
+                            Circle()
+                                .fill(Color.Brand.success.opacity(0.6))
+                                .frame(width: 4, height: 4)
+                            Text(feat)
+                                .font(Typography.caption)
+                                .foregroundStyle(Color.Brand.textSecondary)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(Spacing.lg)
+        .background(Color.Brand.surface)
+        .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md)
+                .strokeBorder(Color.Brand.success.opacity(0.45), lineWidth: 1.5)
+        )
+    }
+
+    private func plantConfidenceBadge(_ confidence: Double) -> some View {
+        let pct = Int(confidence * 100)
+        let color: Color = confidence >= 0.8 ? Color.Brand.success
+            : confidence >= 0.6 ? Color.Brand.warning
+            : Color.Brand.error
+        return Text("\(pct)%")
+            .font(Typography.caption.weight(.bold))
+            .foregroundStyle(color)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
+    }
+
+    private func plantWarningCard(_ warning: PlantWarning, safetyNote: String?) -> some View {
+        let isFatal = warning.level == "fatal"
+        let warningColor = isFatal ? Color.Brand.error : Color.Brand.warning
+        let icon = isFatal ? "exclamationmark.triangle.fill" : "exclamationmark.circle.fill"
+        return VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                    .foregroundStyle(warningColor)
+                Text(warning.level.capitalized + " Hazard")
+                    .font(Typography.callout.weight(.bold))
+                    .foregroundStyle(warningColor)
+            }
+            Text(warning.note)
+                .font(Typography.callout)
+                .foregroundStyle(Color.Brand.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            let poison = PoisonControl.info(for: Locale.current.region)
+            Group {
+                if let url = poison.phoneURL {
+                    Link(destination: url) {
+                        Text(poison.text)
+                            .font(Typography.caption)
+                            .foregroundStyle(Color.Brand.accent)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    Text(poison.text)
+                        .font(Typography.caption)
+                        .foregroundStyle(Color.Brand.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let note = safetyNote {
+                Divider().overlay(warningColor.opacity(0.3))
+                Text(note)
+                    .font(Typography.caption.weight(.semibold))
+                    .foregroundStyle(warningColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(Spacing.lg)
+        .background(warningColor.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md)
+                .strokeBorder(warningColor.opacity(0.5), lineWidth: 1.5)
+        )
+    }
+
+    private func plantSafetyNoteView(_ note: String) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.Brand.warning)
+            Text(note)
+                .font(Typography.caption.weight(.semibold))
+                .foregroundStyle(Color.Brand.warning)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Spacing.md)
+        .background(Color.Brand.warning.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
+    }
+
+    // MARK: — Plant unidentified
+
+    private func plantUnidentifiedView(_ message: String) -> some View {
+        VStack(spacing: Spacing.xl) {
+            Image(systemName: "leaf.arrow.triangle.circlepath")
+                .font(.system(size: 52))
+                .foregroundStyle(Color.Brand.textSecondary)
+            VStack(spacing: Spacing.sm) {
+                Text("Couldn't identify the plant")
+                    .font(Typography.headline)
+                    .foregroundStyle(Color.Brand.textPrimary)
+                Text(message)
+                    .font(Typography.body)
+                    .foregroundStyle(Color.Brand.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            VStack(spacing: Spacing.sm) {
+                Button {
+                    dismiss()   // return to camera — user switches to Deep Scan
+                } label: {
+                    Label("Try Deep Scan", systemImage: "video.fill")
+                        .font(Typography.callout.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Spacing.md)
+                        .background(Color.Brand.scanDeep)
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                }
+                Button {
+                    dismiss()   // return to camera — user frames closer
+                } label: {
+                    Label("Scan Closer", systemImage: "camera.viewfinder")
+                        .font(Typography.callout.weight(.medium))
+                        .foregroundStyle(Color.Brand.accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Spacing.md)
+                        .background(Color.Brand.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Radius.md)
+                                .strokeBorder(Color.Brand.accent, lineWidth: 1)
+                        )
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(Spacing.xxl)
     }
 
     // MARK: — Loading skeleton

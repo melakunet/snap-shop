@@ -65,6 +65,24 @@ export const ShopItem = z.object({
 })
 export type ShopItem = z.infer<typeof ShopItem>
 
+// Plant identification — attached to IdentifyResult when category is plant-like
+export const PlantWarning = z.object({
+  level: z.enum(['fatal', 'severe', 'moderate']),
+  note: z.string(),
+})
+export type PlantWarning = z.infer<typeof PlantWarning>
+
+export const PlantResult = z.object({
+  common_name: z.string(),
+  latin_name: z.string(),
+  confidence: z.number().min(0).max(1),
+  features_observed: z.array(z.string()),
+  hazard_signals: z.array(z.string()),
+  warning: PlantWarning.optional(),
+  safety_note: z.string().optional(),
+})
+export type PlantResult = z.infer<typeof PlantResult>
+
 // /product/reviews — request and response
 
 export const ReviewItem = z.object({

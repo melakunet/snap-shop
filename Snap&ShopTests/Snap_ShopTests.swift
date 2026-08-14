@@ -150,3 +150,40 @@ struct KeychainStoreTests {
         #expect(BackendClient.tokenProvider == nil)
     }
 }
+
+// MARK: — PoisonControl tests
+
+struct PoisonControlTests {
+
+    @Test func canadaReturnsNationalLine() {
+        let info = PoisonControl.info(for: Locale.Region("CA"))
+        #expect(info.text.contains("1-844-764-7669"))
+        #expect(info.text.contains("Quebec"))
+        #expect(info.phoneURL == URL(string: "tel:18447647669"))
+    }
+
+    @Test func usReturnsAmericanLine() {
+        let info = PoisonControl.info(for: Locale.Region("US"))
+        #expect(info.text.contains("1-800-222-1222"))
+        #expect(info.phoneURL == URL(string: "tel:18002221222"))
+    }
+
+    @Test func ukReturnsNHS111() {
+        let info = PoisonControl.info(for: Locale.Region("GB"))
+        #expect(info.text.contains("NHS 111"))
+        #expect(info.text.contains("999"))
+        #expect(info.phoneURL == URL(string: "tel:111"))
+    }
+
+    @Test func unknownRegionReturnsGenericTextWithNoPhone() {
+        let info = PoisonControl.info(for: Locale.Region("AU"))
+        #expect(info.text.contains("local poison control"))
+        #expect(info.phoneURL == nil)
+    }
+
+    @Test func nilRegionReturnsGenericTextWithNoPhone() {
+        let info = PoisonControl.info(for: nil)
+        #expect(info.text.contains("local poison control"))
+        #expect(info.phoneURL == nil)
+    }
+}
