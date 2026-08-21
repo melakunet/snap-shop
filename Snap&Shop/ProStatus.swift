@@ -12,6 +12,12 @@ final class ProStatus: ObservableObject {
     @Published private(set) var isPro = false
 
     func refresh() async {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "debug_force_pro") {
+            isPro = true
+            return
+        }
+        #endif
         var hasPro = false
         for await result in Transaction.currentEntitlements {
             guard case .verified(let tx) = result,

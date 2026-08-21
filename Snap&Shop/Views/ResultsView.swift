@@ -48,6 +48,7 @@ struct ResultsView: View {
     var uploadData: Data?           // pre-cropped payload from CropSheet; skips prepareForUpload
     var barcode: String?            // live-detected barcode; skips Groq vision on the backend
     @Binding var prefillQuery: String
+    @Binding var requestDeepScan: String?
     @State private var phase: ResultsPhase
     @State private var videoPlayer: AVPlayer?
     @State private var identifyResult: IdentifyResult?
@@ -70,6 +71,28 @@ struct ResultsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query private var savedItems: [SavedItem]
+    @AppStorage(RetailerPrefs.userDefaultsKey) private var retailerSelectionCSV = ""
+
+    private var retailerWhitelist: [String] { RetailerPrefs.whitelist(from: retailerSelectionCSV) }
+
+    private enum ConfidenceThreshold {
+        static let escalation: Double = 0.6
+        static let bestGuess:  Double = 0.35
+    }
+
+    // Non-nil only for Precision image scans where the AI produced a confidence score.
+    // Guards: must be precision mode, image-based, not a barcode hit, not a plant, not text/URL.
+    private var precisionConfidence: Double? {
+        guard scanMode == .precision,
+              imageData != nil,
+              !isBarcodeResult,
+              textQuery == nil,
+              productPageURL == nil,
+              let result = identifyResult,
+              result.plant == nil
+        else { return nil }
+        return result.confidence
+    }
 
     init(
         scanMode: ScanMode = .precision,
@@ -81,6 +104,7 @@ struct ResultsView: View {
         uploadData: Data? = nil,
         barcode: String? = nil,
         prefillQuery: Binding<String> = .constant(""),
+        requestDeepScan: Binding<String?> = .constant(nil),
         phase: ResultsPhase = .loaded(PriceResult.samples)
     ) {
         self.scanMode = scanMode
@@ -92,6 +116,7 @@ struct ResultsView: View {
         self.uploadData = uploadData
         self.barcode = barcode
         _prefillQuery = prefillQuery
+        _requestDeepScan = requestDeepScan
         let autoStart = imageData != nil || videoURL != nil || textQuery != nil || productPageURL != nil
         _phase = State(initialValue: autoStart ? .loading : phase)
         _videoPlayer = State(initialValue: videoURL.map { AVPlayer(url: $0) })
@@ -140,15 +165,15 @@ struct ResultsView: View {
                     } else {
                         toUpload = await ImageCropper.prepareForUpload(data: data)
                     }
-                    let (product, items) = try await BackendClient.scan(imageData: toUpload, barcode: barcode)
+                    let (product, items) = try await BackendClient.scan(imageData: toUpload, barcode: barcode, whitelist: retailerWhitelist)
                     productResult = product
                     shopItems = items
                 } else if let url = videoURL {
-                    let (product, items) = try await BackendClient.scanDeep(videoURL: url, hint: hint)
+                    let (product, items) = try await BackendClient.scanDeep(videoURL: url, hint: hint, whitelist: retailerWhitelist)
                     productResult = product
                     shopItems = items
                 } else if let pageURL = productPageURL {
-                    let (product, items) = try await BackendClient.identifyURL(url: pageURL)
+                    let (product, items) = try await BackendClient.identifyURL(url: pageURL, whitelist: retailerWhitelist)
                     productResult = product
                     shopItems = items
                 } else {
@@ -324,8 +349,22 @@ struct ResultsView: View {
     private func loadedView(_ results: [PriceResult]) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
+                // Very low confidence: banner appears ABOVE product header
+                if let conf = precisionConfidence, conf < ConfidenceThreshold.bestGuess {
+                    lowConfidenceBanner(isProminent: true)
+                        .padding(.horizontal, Spacing.xl)
+                }
+
                 productHeader
                     .padding(.horizontal, Spacing.xl)
+
+                // Low confidence (but not very low): banner appears BELOW product header
+                if let conf = precisionConfidence,
+                   conf >= ConfidenceThreshold.bestGuess,
+                   conf < ConfidenceThreshold.escalation {
+                    lowConfidenceBanner(isProminent: false)
+                        .padding(.horizontal, Spacing.xl)
+                }
 
                 // Plant species + warning cards shown before shopping results
                 if let plant = identifyResult?.plant {
@@ -352,6 +391,55 @@ struct ResultsView: View {
             .padding(.top, Spacing.xl)
             .padding(.bottom, Spacing.xxxl)
         }
+    }
+
+    private func lowConfidenceBanner(isProminent: Bool) -> some View {
+        let conf = identifyResult?.confidence ?? 0
+        let pct = Int(conf * 100)
+        let name: String = {
+            guard let r = identifyResult else { return "this item" }
+            let parts = [r.brand, r.model].filter { !$0.isEmpty }
+            return parts.isEmpty ? r.category : parts.joined(separator: " ")
+        }()
+        let hint = identifyResult?.searchQuery ?? ""
+        let bannerColor: Color = isProminent ? Color.Brand.error : Color.Brand.warning
+        let icon = isProminent ? "exclamationmark.triangle.fill" : "wand.and.sparkles"
+        let message = isProminent
+            ? "Very low confidence (\(pct)%) — results shown are a best guess"
+            : "Not fully sure it's \"\(name)\" (\(pct)%) — try Deep Scan for a better match"
+
+        return HStack(spacing: Spacing.sm) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(bannerColor)
+
+            Text(message)
+                .font(Typography.caption.weight(.semibold))
+                .foregroundStyle(Color.Brand.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+
+            Button {
+                requestDeepScan = hint
+                dismiss()
+            } label: {
+                Text("Deep Scan")
+                    .font(Typography.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, 5)
+                    .background(Color.Brand.scanDeep)
+                    .clipShape(Capsule())
+            }
+        }
+        .padding(Spacing.md)
+        .background(bannerColor.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md)
+                .strokeBorder(bannerColor.opacity(0.35), lineWidth: 1)
+        )
     }
 
     private var sortToggle: some View {
@@ -436,6 +524,16 @@ struct ResultsView: View {
                 Text(result.category.capitalized)
                     .font(Typography.caption)
                     .foregroundStyle(Color.Brand.textSecondary)
+                if let conf = precisionConfidence, conf < ConfidenceThreshold.bestGuess {
+                    Text("BEST GUESS")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color.Brand.error)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.Brand.error.opacity(0.12))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().strokeBorder(Color.Brand.error.opacity(0.3), lineWidth: 1))
+                }
             } else {
                 Text("Identified Product")
                     .font(Typography.headline)

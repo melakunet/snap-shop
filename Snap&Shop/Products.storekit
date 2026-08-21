@@ -1,16 +1,15 @@
 {
-  "identifier" : "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+  "identifier" : "F3A51D2C-8E74-4B90-A6C3-1D2E3F4A5B6C",
   "nonRenewingSubscriptions" : [],
   "products" : [],
   "settings" : {
     "_askToBuyEnabled" : false,
-    "_customerEmail" : null,
     "_storefront" : "USA",
     "_storeKitErrors" : []
   },
   "subscriptionGroups" : [
     {
-      "id" : "B2C3D4E5-F6A7-8901-BCDE-F12345678901",
+      "id" : "7A2B3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D",
       "localizations" : [],
       "name" : "Pro",
       "subscriptions" : [
@@ -20,12 +19,12 @@
           "displayPrice" : "6.99",
           "familyShareable" : false,
           "groupNumber" : 1,
-          "id" : "snapshop_pro_monthly",
-          "internalID" : "C3D4E5F6-A7B8-9012-CDEF-123456789012",
+          "id" : "1A2B3C4D-5E6F-4A7B-9C0D-1E2F3A4B5C6D",
+          "internalID" : "2B3C4D5E-6F7A-4B8C-8D0E-1F2A3B4C5D6E",
           "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Unlimited Precision scans, Deep/Video Scan, live prices from 6+ retailers, and price-drop alerts.",
+              "description" : "Unlimited Precision scans, Deep\/Video Scan, live prices from 6+ retailers, and price-drop alerts.",
               "displayName" : "Snap&Shop Pro Monthly",
               "locale" : "en_US"
             }
@@ -33,7 +32,7 @@
           "productID" : "snapshop_pro_monthly",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Pro Monthly",
-          "subscriptionGroupID" : "B2C3D4E5-F6A7-8901-BCDE-F12345678901",
+          "subscriptionGroupID" : "7A2B3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D",
           "type" : "RecurringSubscription"
         },
         {
@@ -42,17 +41,16 @@
           "displayPrice" : "39.99",
           "familyShareable" : false,
           "groupNumber" : 2,
-          "id" : "snapshop_pro_annual",
-          "internalID" : "D4E5F6A7-B8C9-0123-DEF0-234567890123",
+          "id" : "3C4D5E6F-7A8B-4C9D-AF0E-1A2B3C4D5E6F",
+          "internalID" : "4D5E6F7A-8B9C-4D0E-B01A-2B3C4D5E6F7A",
           "introductoryOffer" : {
             "duration" : "P3D",
-            "offerID" : null,
             "paymentMode" : "FreeTrial",
             "periodCount" : 1
           },
           "localizations" : [
             {
-              "description" : "Unlimited Precision scans, Deep/Video Scan, live prices from 6+ retailers, price-drop alerts, and iCloud sync. Includes a 3-day free trial.",
+              "description" : "Unlimited Precision scans, Deep\/Video Scan, live prices from 6+ retailers, price-drop alerts, and iCloud sync. Includes a 3-day free trial.",
               "displayName" : "Snap&Shop Pro Annual",
               "locale" : "en_US"
             }
@@ -60,7 +58,7 @@
           "productID" : "snapshop_pro_annual",
           "recurringSubscriptionPeriod" : "P1Y",
           "referenceName" : "Pro Annual",
-          "subscriptionGroupID" : "B2C3D4E5-F6A7-8901-BCDE-F12345678901",
+          "subscriptionGroupID" : "7A2B3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D",
           "type" : "RecurringSubscription"
         }
       ]

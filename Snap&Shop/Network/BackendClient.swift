@@ -105,7 +105,7 @@ enum BackendClient {
 
     /// Full precision scan: identify image and run OCR in parallel, enrich query, then fetch prices.
     /// Returns (product, []) when plant detection suppresses shopping (dangerous plant or no query).
-    static func scan(imageData: Data, barcode: String? = nil) async throws -> (IdentifyResult, [ShopItem]) {
+    static func scan(imageData: Data, barcode: String? = nil, whitelist: [String] = []) async throws -> (IdentifyResult, [ShopItem]) {
         async let productResult = identifyPrecision(imageData: imageData, barcode: barcode)
         async let ocrText = ImageCropper.recognizeText(in: imageData)
 
@@ -120,7 +120,7 @@ enum BackendClient {
             print("[OCR] enriched query: \"\(query)\"")
         }
         #endif
-        let prices = try await shop(query: query)
+        let prices = try await shop(query: query, retailerWhitelist: whitelist)
         return (product, prices)
     }
 
@@ -155,12 +155,12 @@ enum BackendClient {
 
     /// Full deep scan: extract keyframes, identify, fetch prices.
     /// Returns (product, []) when plant detection suppresses shopping.
-    static func scanDeep(videoURL: URL, hint: String? = nil) async throws -> (IdentifyResult, [ShopItem]) {
+    static func scanDeep(videoURL: URL, hint: String? = nil, whitelist: [String] = []) async throws -> (IdentifyResult, [ShopItem]) {
         let frames = try await extractKeyframes(from: videoURL, count: 8)
         let product = try await identifyDeep(frames: frames, hint: hint)
         let q = product.searchQuery.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return (product, []) }
-        let prices = try await shop(query: q)
+        let prices = try await shop(query: q, retailerWhitelist: whitelist)
         return (product, prices)
     }
 
@@ -221,7 +221,7 @@ enum BackendClient {
     // MARK: — URL identify
 
     /// POST { url } to /identify/url, then fetch prices for the resolved search query.
-    static func identifyURL(url: URL) async throws -> (IdentifyResult, [ShopItem]) {
+    static func identifyURL(url: URL, whitelist: [String] = []) async throws -> (IdentifyResult, [ShopItem]) {
         let endpoint = AppConfig.backendBaseURL.appending(path: "/identify/url")
         var request = makeRequest(url: endpoint, method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -230,7 +230,7 @@ enum BackendClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try checkHTTP(response, data)
         let product = try decode(IdentifyResult.self, from: data)
-        let prices = try await shop(query: product.searchQuery)
+        let prices = try await shop(query: product.searchQuery, retailerWhitelist: whitelist)
         return (product, prices)
     }
 

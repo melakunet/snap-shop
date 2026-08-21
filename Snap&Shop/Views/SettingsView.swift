@@ -2,14 +2,19 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var authState: AuthState
+    @EnvironmentObject private var proStatus: ProStatus
     @State private var defaultMode: ScanMode = .precision
     @State private var iCloudSync = true
     @State private var priceAlerts = true
     @State private var haptics = true
-    @State private var selectedRetailers: Set<String> = Set(Retailer.all.map(\.name))
+    @AppStorage(RetailerPrefs.userDefaultsKey) private var retailerSelectionCSV = ""
     @State private var showSignOutConfirm = false
     #if DEBUG
     @State private var quotaUsed = QuotaManager.scansUsed()
+    @AppStorage("debug_force_pro") private var debugForcePro = false
+    @State private var versionTapCount = 0
+    @State private var showForceProAlert = false
+    @State private var showPaywallPreview = false
     #endif
 
     var body: some View {
@@ -44,6 +49,12 @@ struct SettingsView: View {
             } message: {
                 Text("Your scan history will remain on this device.")
             }
+            #if DEBUG
+            .fullScreenCover(isPresented: $showPaywallPreview) {
+                PaywallView()
+                    .environmentObject(proStatus)
+            }
+            #endif
         }
     }
 
@@ -75,15 +86,15 @@ struct SettingsView: View {
 
     private var retailerSection: some View {
         Section {
-            ForEach(Retailer.all) { retailer in
+            ForEach(RetailerPrefs.all, id: \.name) { retailer in
                 Toggle(isOn: Binding(
-                    get: { selectedRetailers.contains(retailer.name) },
+                    get: {
+                        RetailerPrefs.enabledRetailers(from: retailerSelectionCSV).contains(retailer.name)
+                    },
                     set: { on in
-                        if on {
-                            selectedRetailers.insert(retailer.name)
-                        } else {
-                            selectedRetailers.remove(retailer.name)
-                        }
+                        var enabled = RetailerPrefs.enabledRetailers(from: retailerSelectionCSV)
+                        if on { enabled.insert(retailer.name) } else { enabled.remove(retailer.name) }
+                        retailerSelectionCSV = RetailerPrefs.csv(from: enabled)
                     }
                 )) {
                     HStack(spacing: Spacing.md) {
@@ -97,8 +108,26 @@ struct SettingsView: View {
                 }
                 .tint(Color.Brand.accent)
             }
+            if !retailerSelectionCSV.isEmpty {
+                Button {
+                    retailerSelectionCSV = ""   // empty = all enabled = no filter
+                } label: {
+                    Text("Reset to All Retailers")
+                        .font(Typography.body)
+                        .foregroundStyle(Color.Brand.accent)
+                }
+            }
         } header: {
-            sectionHeader("Trusted Retailers")
+            HStack {
+                sectionHeader("Trusted Retailers")
+                Spacer()
+                let count = RetailerPrefs.enabledRetailers(from: retailerSelectionCSV).count
+                if count < RetailerPrefs.allNames.count {
+                    Text("\(count) of \(RetailerPrefs.allNames.count)")
+                        .font(Typography.caption)
+                        .foregroundStyle(Color.Brand.textSecondary)
+                }
+            }
         }
         .listRowBackground(Color.Brand.surface)
         .listRowSeparatorTint(Color.Brand.border)
@@ -177,9 +206,31 @@ struct SettingsView: View {
                     .font(Typography.body)
                     .foregroundStyle(Color.Brand.textSecondary)
             }
+            #if DEBUG
+            .contentShape(Rectangle())
+            .onTapGesture {
+                versionTapCount += 1
+                if versionTapCount >= 5 {
+                    versionTapCount = 0
+                    debugForcePro.toggle()
+                    Task { await proStatus.refresh() }
+                    showForceProAlert = true
+                }
+            }
+            #endif
         } header: {
             sectionHeader("Account")
         }
+        #if DEBUG
+        .alert(debugForcePro ? "Pro Override: ON" : "Pro Override: OFF",
+               isPresented: $showForceProAlert) {
+            Button("OK") {}
+        } message: {
+            Text(debugForcePro
+                 ? "App now behaves as Pro. Tap version 5× again to disable."
+                 : "Pro override removed. StoreKit consulted normally.")
+        }
+        #endif
         .listRowBackground(Color.Brand.surface)
         .listRowSeparatorTint(Color.Brand.border)
     }
@@ -187,6 +238,15 @@ struct SettingsView: View {
     #if DEBUG
     private var debugSection: some View {
         Section {
+            HStack {
+                Text("Force Pro")
+                    .font(Typography.body)
+                    .foregroundStyle(Color.Brand.textPrimary)
+                Spacer()
+                Text(debugForcePro ? "ON" : "OFF")
+                    .font(Typography.body.weight(.semibold))
+                    .foregroundStyle(debugForcePro ? Color.Brand.success : Color.Brand.textSecondary)
+            }
             HStack {
                 Text("Precision Scans Used")
                     .font(Typography.body)
@@ -204,6 +264,13 @@ struct SettingsView: View {
                     .font(Typography.body)
                     .foregroundStyle(Color.Brand.error)
             }
+            Button {
+                showPaywallPreview = true
+            } label: {
+                Text("Preview Paywall")
+                    .font(Typography.body)
+                    .foregroundStyle(Color.Brand.accent)
+            }
         } header: {
             sectionHeader("DEBUG")
         }
@@ -220,21 +287,9 @@ struct SettingsView: View {
     }
 }
 
-private struct Retailer: Identifiable {
-    let id = UUID()
-    let name: String
-    let icon: String
-
-    static let all: [Retailer] = [
-        Retailer(name: "Amazon", icon: "cart.fill"),
-        Retailer(name: "Walmart", icon: "bag.fill"),
-        Retailer(name: "Best Buy", icon: "tv.fill"),
-        Retailer(name: "eBay", icon: "tag.fill"),
-        Retailer(name: "Target", icon: "scope"),
-        Retailer(name: "B&H", icon: "camera.fill")
-    ]
-}
 
 #Preview {
     SettingsView()
+        .environmentObject(AuthState())
+        .environmentObject(ProStatus())
 }

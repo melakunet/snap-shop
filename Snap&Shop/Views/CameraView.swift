@@ -39,6 +39,7 @@ struct CameraView: View {
     @State private var transcriptVideoPlayer: AVPlayer? = nil
     @State private var frameFromVideo: Data? = nil
     @State private var showVideoFrameCrop = false
+    @State private var deepScanEscalationHint: String? = nil
     #if DEBUG
     @State private var isDebugScanning = false
     @State private var debugTask: Task<Void, Never>?
@@ -109,11 +110,11 @@ struct CameraView: View {
             }
             .navigationDestination(isPresented: $showResults) {
                 if let frameData = frameFromVideo {
-                    ResultsView(scanMode: .precision, imageData: frameData, uploadData: pendingUploadData)
+                    ResultsView(scanMode: .precision, imageData: frameData, uploadData: pendingUploadData, requestDeepScan: $deepScanEscalationHint)
                 } else if let videoURL = session.capturedVideoURL {
                     ResultsView(scanMode: .deep, videoURL: videoURL, hint: voiceHint)
                 } else if let data = session.capturedImageData {
-                    ResultsView(scanMode: scanMode, imageData: data, uploadData: pendingUploadData, barcode: barcodeForCapture)
+                    ResultsView(scanMode: scanMode, imageData: data, uploadData: pendingUploadData, barcode: barcodeForCapture, requestDeepScan: $deepScanEscalationHint)
                 } else if !submittedQuery.isEmpty {
                     ResultsView(textQuery: submittedQuery)
                 } else if let url = pastedURL {
@@ -284,7 +285,12 @@ struct CameraView: View {
                 frameFromVideo = nil
                 barcodeForCapture = nil
                 session.clearDetectedBarcode()
-                if !prefillQuery.isEmpty {
+                if let escalationHint = deepScanEscalationHint {
+                    // Low-confidence result requested escalation to Deep Scan
+                    scanMode = .deep
+                    voiceHint = escalationHint
+                    deepScanEscalationHint = nil
+                } else if !prefillQuery.isEmpty {
                     searchQuery = prefillQuery
                     prefillQuery = ""
                     searchFocused = true

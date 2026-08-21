@@ -118,6 +118,15 @@ struct PaywallView: View {
         VStack(spacing: Spacing.sm) {
             if storeUnavailable {
                 storeUnavailableRow
+                if let diag = errorMessage {
+                    Text(diag)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color.Brand.error)
+                        .multilineTextAlignment(.leading)
+                        .padding(Spacing.md)
+                        .background(Color.Brand.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
+                }
             } else {
                 ForEach(products, id: \.id) { product in
                     planCard(product)
@@ -212,10 +221,12 @@ struct PaywallView: View {
                 Task { await purchase() }
             } label: {
                 ZStack {
-                    if busy {
-                        ProgressView().tint(unavail ? Color.Brand.textSecondary : Color.Brand.accentOn)
+                    if busy && !unavail {
+                        ProgressView().tint(Color.Brand.accentOn)
                     } else {
-                        Text(selectedID == ProStatus.annualID ? "Start Free Trial" : "Subscribe Now")
+                        Text(unavail
+                             ? "Store Unavailable"
+                             : (selectedID == ProStatus.annualID ? "Start Free Trial" : "Subscribe Now"))
                     }
                 }
                 .font(Typography.callout.weight(.semibold))
@@ -228,11 +239,14 @@ struct PaywallView: View {
                         : Color.Brand.accent.opacity(busy ? 0.7 : 1.0)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+                .opacity(unavail ? 0.5 : 1.0)
             }
             .disabled(busy || selectedProduct == nil)
             .animation(.easeInOut(duration: 0.15), value: busy)
+            .animation(.easeInOut(duration: 0.15), value: unavail)
 
-            if let error = errorMessage {
+            // Only show purchase/restore errors here; load diagnostics appear in planPicker above
+            if let error = errorMessage, !storeUnavailable {
                 Text(error)
                     .font(Typography.caption)
                     .foregroundStyle(Color.Brand.error)
@@ -266,29 +280,40 @@ struct PaywallView: View {
         storeUnavailable = false
         errorMessage = nil
         let requestedIDs = [ProStatus.monthlyID, ProStatus.annualID]
-        #if DEBUG
-        print("[PaywallView] requesting product IDs: \(requestedIDs.joined(separator: ", "))")
-        #endif
+        let bundleID = Bundle.main.bundleIdentifier ?? "nil"
         do {
             let loaded = try await Product.products(for: requestedIDs)
-            #if DEBUG
-            print("[PaywallView] loaded \(loaded.count) product(s): \(loaded.map(\.id))")
-            #endif
             if loaded.isEmpty {
                 storeUnavailable = true
+                errorMessage = """
+                    RESULT: 0 products returned (no error thrown)
+                    REQUESTED: \(requestedIDs)
+                    RETURNED: \(loaded.map(\.id))
+                    BUNDLE: \(bundleID)
+                    """
             } else {
                 // Annual first in the list
                 products = loaded.sorted { $0.id == ProStatus.annualID && $1.id != ProStatus.annualID }
             }
         } catch {
             storeUnavailable = true
-            errorMessage = error.localizedDescription
+            let raw = String(describing: error)
+            errorMessage = """
+                RESULT: threw error
+                REQUESTED: \(requestedIDs)
+                ERROR: \(error.localizedDescription)
+                RAW: \(raw)
+                BUNDLE: \(bundleID)
+                """
         }
         isLoading = false
     }
 
     private func purchase() async {
-        guard let product = selectedProduct else { return }
+        guard let product = selectedProduct else {
+            errorMessage = "Pricing unavailable — tap Retry above to reload."
+            return
+        }
         isPurchasing = true
         errorMessage = nil
         do {
