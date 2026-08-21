@@ -1,6 +1,62 @@
 import AVKit
+import Charts
 import SwiftUI
 import SwiftData
+
+// MARK: — Trust level classification for retailer source strings
+
+enum TrustLevel {
+    case majorRetailer, marketplace, unknown
+
+    static func from(_ source: String) -> TrustLevel {
+        let s = source.lowercased()
+        let major = ["amazon", "walmart", "best buy", "target", "costco", "apple",
+                     "home depot", "lowe's", "lowes", "newegg", "b&h", "adorama",
+                     "staples", "sam's club", "kohl's", "macy's", "macys",
+                     "nordstrom", "nike", "gap", "crate and barrel", "williams sonoma",
+                     "bed bath", "dell", "lenovo", "microsoft store", "samsung"]
+        let market = ["ebay", "etsy", "poshmark", "mercari", "aliexpress",
+                      "wish", "temu", "shein", "facebook marketplace"]
+        if major.contains(where: { s.contains($0) }) { return .majorRetailer }
+        if market.contains(where: { s.contains($0) }) { return .marketplace }
+        return .unknown
+    }
+
+    var label: String? {
+        switch self {
+        case .majorRetailer: "Major retailer"
+        case .marketplace:   "Marketplace"
+        case .unknown:       nil
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .majorRetailer: Color.Brand.success
+        case .marketplace:   Color.Brand.warning
+        case .unknown:       .clear
+        }
+    }
+}
+
+// MARK: — Shipping cost parser (P4.003)
+
+/// Parse a human-readable shipping string (e.g. "Free shipping", "$5.99 shipping")
+/// into a structured cost. Returns (nil, false) when the string carries no parseable amount.
+func parseShippingCost(_ delivery: String) -> (cost: Double?, known: Bool) {
+    let lower = delivery.lowercased().trimmingCharacters(in: .whitespaces)
+    guard !lower.isEmpty else { return (nil, false) }
+    if lower.contains("free") { return (0.0, true) }
+    guard let regex = try? NSRegularExpression(pattern: #"\$\s*(\d+(?:\.\d{1,2})?)"#) else {
+        return (nil, false)
+    }
+    let nsRange = NSRange(delivery.startIndex..., in: delivery)
+    guard let match = regex.firstMatch(in: delivery, range: nsRange),
+          let cap = Range(match.range(at: 1), in: delivery),
+          let cost = Double(delivery[cap])
+    else { return (nil, false) }
+    return (cost, true)
+}
 
 struct PriceResult: Identifiable {
     let id = UUID()
@@ -16,6 +72,10 @@ struct PriceResult: Identifiable {
     let snippet: String?
     let productId: String?
     let extractedPrice: Double
+    let shippingCost: Double?   // nil = unknown, 0 = free, >0 = paid
+    let shippingKnown: Bool     // true when cost was successfully parsed
+    let totalPrice: Double      // extractedPrice + (shippingCost ?? 0); sort key
+    let trustLevel: TrustLevel  // retailer trust classification
 }
 
 enum SortMode: String, CaseIterable {
@@ -63,6 +123,11 @@ struct ResultsView: View {
     @State private var frameImageData: Data? = nil
     @State private var showFrameResults = false
     @State private var frameScanUploadData: Data? = nil
+    // P4.004 — price history sparkline
+    @State private var priceHistory: [(date: Date, price: Double)] = []
+    // P4.006 — multi-item chip navigation
+    @State private var activeShopQuery: String? = nil
+    @State private var chipCache: [String: [PriceResult]] = [:]
     #if DEBUG
     @State private var debugCropPreview: UIImage? = nil
     #endif
@@ -146,14 +211,19 @@ struct ResultsView: View {
                 var productResult: IdentifyResult? = nil
                 let sort = sortMode.rawValue
 
-                // If identify already ran (re-sort): skip identify, just re-fetch /shop
+                // Re-sort or chip switch: identifyResult already set — skip identify, re-fetch /shop
                 if let result = identifyResult {
-                    let q = result.searchQuery.trimmingCharacters(in: .whitespaces)
+                    let q = (activeShopQuery ?? result.searchQuery).trimmingCharacters(in: .whitespaces)
+                    let cacheKey = "\(q)|\(sort)"
+                    if let cached = chipCache[cacheKey] {
+                        phase = .loaded(cached)
+                        return
+                    }
                     guard !q.isEmpty else {
                         phase = .error("Couldn't build a search query — try a clearer photo.")
                         return
                     }
-                    shopItems = try await BackendClient.shop(query: q, sort: sort)
+                    shopItems = try await BackendClient.shop(query: q, retailerWhitelist: retailerWhitelist, sort: sort)
                 } else if let query = textQuery {
                     let q = query.trimmingCharacters(in: .whitespaces)
                     guard !q.isEmpty else { phase = .empty; return }
@@ -185,6 +255,29 @@ struct ResultsView: View {
                 }
 
                 let priceResults = mapToPriceResults(shopItems)
+
+                // Cache chip / re-sort results so switching chips doesn't re-fetch
+                let effectiveCacheQ = (activeShopQuery ?? identifyResult?.searchQuery ?? "")
+                    .trimmingCharacters(in: .whitespaces)
+                if !effectiveCacheQ.isEmpty {
+                    chipCache["\(effectiveCacheQ)|\(sort)"] = priceResults
+                }
+
+                // Build sparkline history on first scan (not re-sorts or chip switches)
+                if let product = productResult {
+                    let lowestTotal = priceResults.min(by: { $0.totalPrice < $1.totalPrice })?.totalPrice ?? 0
+                    let normalized = product.searchQuery.lowercased().trimmingCharacters(in: .whitespaces)
+                    if !normalized.isEmpty {
+                        let descriptor = FetchDescriptor<ScanRecord>(sortBy: [SortDescriptor(\ScanRecord.date)])
+                        let all = (try? modelContext.fetch(descriptor)) ?? []
+                        var history: [(date: Date, price: Double)] = all
+                            .filter { $0.searchQuery.lowercased().trimmingCharacters(in: .whitespaces) == normalized }
+                            .map { ($0.date, $0.lowestPrice) }
+                        history.append((Date(), lowestTotal))
+                        priceHistory = history
+                    }
+                }
+
                 // For plant scans with no shopping results, still enter loaded state
                 // so the species card and warning card render (productResult?.plant != nil).
                 if priceResults.isEmpty && productResult?.plant == nil {
@@ -304,42 +397,43 @@ struct ResultsView: View {
 
     private func mapToPriceResults(_ items: [ShopItem]) -> [PriceResult] {
         guard !items.isEmpty else { return [] }
+
+        func makeResult(_ item: ShopItem, isBest: Bool) -> PriceResult {
+            let (cost, known) = parseShippingCost(item.delivery)
+            let total = item.extractedPrice + (cost ?? 0)
+            return PriceResult(
+                retailer: item.source,
+                price: item.price,
+                shipping: item.delivery,
+                isBest: isBest,
+                link: item.link,
+                thumbnail: item.thumbnail,
+                rating: item.rating,
+                reviewCount: item.reviewCount,
+                title: item.title,
+                snippet: item.snippet,
+                productId: item.productId,
+                extractedPrice: item.extractedPrice,
+                shippingCost: cost,
+                shippingKnown: known,
+                totalPrice: total,
+                trustLevel: TrustLevel.from(item.source)
+            )
+        }
+
         if sortMode == .reviews {
             // Backend already sorted by Bayesian score; first item is best reviewed
-            return items.enumerated().map { index, item in
-                PriceResult(
-                    retailer: item.source,
-                    price: item.price,
-                    shipping: item.delivery,
-                    isBest: index == 0,
-                    link: item.link,
-                    thumbnail: item.thumbnail,
-                    rating: item.rating,
-                    reviewCount: item.reviewCount,
-                    title: item.title,
-                    snippet: item.snippet,
-                    productId: item.productId,
-                    extractedPrice: item.extractedPrice
-                )
-            }
+            return items.enumerated().map { index, item in makeResult(item, isBest: index == 0) }
         } else {
-            let sorted = items.sorted { $0.extractedPrice < $1.extractedPrice }
-            let bestPrice = sorted.first?.extractedPrice ?? 0
-            return sorted.map { item in
-                PriceResult(
-                    retailer: item.source,
-                    price: item.price,
-                    shipping: item.delivery,
-                    isBest: bestPrice > 0 && item.extractedPrice == bestPrice,
-                    link: item.link,
-                    thumbnail: item.thumbnail,
-                    rating: item.rating,
-                    reviewCount: item.reviewCount,
-                    title: item.title,
-                    snippet: item.snippet,
-                    productId: item.productId,
-                    extractedPrice: item.extractedPrice
-                )
+            // Sort by totalPrice (listPrice + shipping when known, listPrice when unknown)
+            let parsed = items.map { item -> (item: ShopItem, total: Double) in
+                let (cost, _) = parseShippingCost(item.delivery)
+                return (item, item.extractedPrice + (cost ?? 0))
+            }
+            let sorted = parsed.sorted { $0.total < $1.total }
+            let bestTotal = sorted.first?.total ?? 0
+            return sorted.map { pair in
+                makeResult(pair.item, isBest: bestTotal > 0 && pair.total == bestTotal)
             }
         }
     }
@@ -366,6 +460,11 @@ struct ResultsView: View {
                         .padding(.horizontal, Spacing.xl)
                 }
 
+                // Multi-item chip bar (P4.006): appears when deep pan detects >1 product
+                if let otherItems = identifyResult?.otherItems, !otherItems.isEmpty {
+                    multiItemChipBar(otherItems: otherItems)
+                }
+
                 // Plant species + warning cards shown before shopping results
                 if let plant = identifyResult?.plant {
                     plantSpeciesCard(plant)
@@ -390,6 +489,66 @@ struct ResultsView: View {
             }
             .padding(.top, Spacing.xl)
             .padding(.bottom, Spacing.xxxl)
+        }
+    }
+
+    // MARK: — Multi-item chip bar (P4.006)
+
+    private func multiItemChipBar(otherItems: [OtherItem]) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("We spotted \(otherItems.count + 1) products")
+                .font(Typography.caption.weight(.semibold))
+                .foregroundStyle(Color.Brand.textSecondary)
+                .padding(.horizontal, Spacing.xl)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Spacing.sm) {
+                    let bestName: String = {
+                        guard let r = identifyResult else { return "Best match" }
+                        let parts = [r.brand, r.model].filter { !$0.isEmpty }
+                        return parts.isEmpty ? r.category.capitalized : parts.joined(separator: " ")
+                    }()
+                    chipButton(label: bestName, isSelected: activeShopQuery == nil) {
+                        switchChip(to: nil)
+                    }
+                    ForEach(otherItems) { item in
+                        chipButton(label: item.displayName, isSelected: activeShopQuery == item.searchQuery) {
+                            switchChip(to: item.searchQuery)
+                        }
+                    }
+                }
+                .padding(.horizontal, Spacing.xl)
+                .padding(.vertical, Spacing.xs)
+            }
+        }
+    }
+
+    private func chipButton(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(Typography.caption.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? Color.Brand.accentOn : Color.Brand.textPrimary)
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, 6)
+                .background(isSelected ? Color.Brand.accent : Color.Brand.surface)
+                .clipShape(Capsule())
+                .overlay(Capsule().strokeBorder(
+                    isSelected ? Color.Brand.accent : Color.Brand.border, lineWidth: 1
+                ))
+        }
+        .buttonStyle(.plain)
+        .lineLimit(1)
+    }
+
+    private func switchChip(to query: String?) {
+        activeShopQuery = query
+        let effectiveQ = (query ?? identifyResult?.searchQuery ?? "").trimmingCharacters(in: .whitespaces)
+        let cacheKey = "\(effectiveQ)|\(sortMode.rawValue)"
+        if let cached = chipCache[cacheKey] {
+            phase = .loaded(cached)
+        } else {
+            phase = .loading
+            fetchID += 1
         }
     }
 
@@ -534,12 +693,64 @@ struct ResultsView: View {
                         .clipShape(Capsule())
                         .overlay(Capsule().strokeBorder(Color.Brand.error.opacity(0.3), lineWidth: 1))
                 }
+                priceSparklineView
             } else {
                 Text("Identified Product")
                     .font(Typography.headline)
                     .foregroundStyle(Color.Brand.textPrimary)
             }
             modeBadge
+        }
+    }
+
+    // MARK: — Price sparkline (P4.004)
+
+    @ViewBuilder
+    private var priceSparklineView: some View {
+        if priceHistory.count >= 2 {
+            let displayed = Array(priceHistory.suffix(10))
+            let first = displayed.first?.price ?? 0
+            let last = displayed.last?.price ?? 0
+            let delta = last - first
+            let absDelta = abs(delta)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Chart {
+                    ForEach(Array(displayed.enumerated()), id: \.offset) { i, point in
+                        LineMark(
+                            x: .value("Scan", i),
+                            y: .value("Price", point.price)
+                        )
+                        .foregroundStyle(Color(red: 1, green: 0.76, blue: 0))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                        AreaMark(
+                            x: .value("Scan", i),
+                            y: .value("Price", point.price)
+                        )
+                        .foregroundStyle(.linearGradient(
+                            colors: [Color(red: 1, green: 0.76, blue: 0).opacity(0.15), .clear],
+                            startPoint: .top, endPoint: .bottom
+                        ))
+                    }
+                }
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .frame(height: 36)
+
+                let deltaColor: Color = delta < -0.01 ? Color.Brand.success
+                    : delta > 0.01 ? Color.Brand.error
+                    : Color.Brand.textSecondary
+                let caption: String = {
+                    if absDelta < 0.01 { return "Price stable across \(displayed.count) scans" }
+                    let dir = delta < 0 ? "↓" : "↑"
+                    let fmt = absDelta.formatted(.currency(code: "USD"))
+                    return "\(dir) \(fmt) since first scan"
+                }()
+                Text(caption)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(deltaColor)
+            }
+            .padding(.top, 2)
         }
     }
 
@@ -602,9 +813,20 @@ struct ResultsView: View {
                 }
 
                 if result.title != nil {
-                    Text(result.retailer)
-                        .font(Typography.caption)
-                        .foregroundStyle(Color.Brand.accent)
+                    HStack(spacing: 4) {
+                        Text(result.retailer)
+                            .font(Typography.caption)
+                            .foregroundStyle(Color.Brand.accent)
+                        if let label = result.trustLevel.label {
+                            Text(label)
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(result.trustLevel.color)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(result.trustLevel.color.opacity(0.10))
+                                .clipShape(Capsule())
+                        }
+                    }
                 }
 
                 ratingRow(result)
@@ -617,11 +839,20 @@ struct ResultsView: View {
                 }
             }
 
-            VStack(alignment: .trailing, spacing: Spacing.xs) {
+            VStack(alignment: .trailing, spacing: 2) {
                 Text(result.price)
                     .font(Typography.callout.weight(.bold))
                     .foregroundStyle(result.isBest ? Color.Brand.success : Color.Brand.textPrimary)
                     .fixedSize()
+                if result.shippingKnown, let cost = result.shippingCost, cost > 0 {
+                    Text(String(format: "= $%.2f total", result.totalPrice))
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Color.Brand.textSecondary)
+                } else if !result.shippingKnown {
+                    Text("+ shipping")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Color.Brand.warning)
+                }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.Brand.textSecondary)
@@ -1609,11 +1840,11 @@ private struct InlineVideoCropOverlay: View {
 
 extension PriceResult {
     static let samples: [PriceResult] = [
-        PriceResult(retailer: "Amazon",   price: "$279.99", shipping: "Free",   isBest: true,  link: "", thumbnail: "", rating: 4.8, reviewCount: 12543, title: "Nike Air Force 1 Low White/White",         snippet: "Top-rated with fast Prime delivery. Highly rated by thousands of customers.", productId: "mock_amz_1",  extractedPrice: 279.99),
-        PriceResult(retailer: "Walmart",  price: "$289.95", shipping: "$5.99",  isBest: false, link: "", thumbnail: "", rating: 4.6, reviewCount: 3871,  title: "Nike Air Force 1 Low Men's Shoes",         snippet: "Save with everyday low prices and free 2-day shipping on eligible orders.",  productId: "mock_wmt_2",  extractedPrice: 289.95),
-        PriceResult(retailer: "Best Buy", price: "$299.99", shipping: "Free",   isBest: false, link: "", thumbnail: "", rating: 4.7, reviewCount: 1102,  title: "Nike Air Force 1 '07",                     snippet: "Expert advice and price match guarantee at Best Buy.",                       productId: "mock_bbuy_5", extractedPrice: 299.99),
-        PriceResult(retailer: "eBay",     price: "$259.00", shipping: "$12.00", isBest: false, link: "", thumbnail: "", rating: nil, reviewCount: nil,   title: "Nike Air Force 1 Low (Used - Excellent)",  snippet: nil,                                                                         productId: nil,           extractedPrice: 259.00),
-        PriceResult(retailer: "Target",   price: "$319.99", shipping: "Free",   isBest: false, link: "", thumbnail: "", rating: 4.5, reviewCount: 918,   title: "Nike Air Force 1 Low Sneaker",             snippet: "Free shipping on orders over $35 or free same-day pickup.",                productId: "mock_tgt_3",  extractedPrice: 319.99),
+        PriceResult(retailer: "Amazon",   price: "$279.99", shipping: "Free shipping", isBest: true,  link: "", thumbnail: "", rating: 4.8, reviewCount: 12543, title: "Nike Air Force 1 Low White/White",        snippet: "Top-rated with fast Prime delivery.", productId: "mock_amz_1",  extractedPrice: 279.99, shippingCost: 0,    shippingKnown: true,  totalPrice: 279.99, trustLevel: .majorRetailer),
+        PriceResult(retailer: "Walmart",  price: "$289.95", shipping: "$5.99 shipping", isBest: false, link: "", thumbnail: "", rating: 4.6, reviewCount: 3871,  title: "Nike Air Force 1 Low Men's Shoes",       snippet: "Everyday low prices.",               productId: "mock_wmt_2",  extractedPrice: 289.95, shippingCost: 5.99, shippingKnown: true,  totalPrice: 295.94, trustLevel: .majorRetailer),
+        PriceResult(retailer: "Best Buy", price: "$299.99", shipping: "Free shipping", isBest: false, link: "", thumbnail: "", rating: 4.7, reviewCount: 1102,  title: "Nike Air Force 1 '07",                  snippet: "Price match guarantee.",             productId: "mock_bbuy_5", extractedPrice: 299.99, shippingCost: 0,    shippingKnown: true,  totalPrice: 299.99, trustLevel: .majorRetailer),
+        PriceResult(retailer: "eBay",     price: "$259.00", shipping: "$12.00 shipping", isBest: false, link: "", thumbnail: "", rating: nil, reviewCount: nil,   title: "Nike Air Force 1 Low (Used - Excellent)", snippet: nil,                                productId: nil,           extractedPrice: 259.00, shippingCost: 12,   shippingKnown: true,  totalPrice: 271.00, trustLevel: .marketplace),
+        PriceResult(retailer: "Target",   price: "$319.99", shipping: "Free shipping", isBest: false, link: "", thumbnail: "", rating: 4.5, reviewCount: 918,   title: "Nike Air Force 1 Low Sneaker",           snippet: "Free shipping over $35.",            productId: "mock_tgt_3",  extractedPrice: 319.99, shippingCost: 0,    shippingKnown: true,  totalPrice: 319.99, trustLevel: .majorRetailer),
     ]
 }
 

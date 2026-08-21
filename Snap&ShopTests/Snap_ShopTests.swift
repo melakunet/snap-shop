@@ -151,6 +151,108 @@ struct KeychainStoreTests {
     }
 }
 
+// MARK: — Shipping parser tests (P4.003)
+
+struct ShippingParserTests {
+
+    @Test func freeShippingString() {
+        let (cost, known) = parseShippingCost("Free shipping")
+        #expect(cost == 0.0)
+        #expect(known == true)
+    }
+
+    @Test func freeCaseInsensitive() {
+        let (cost, known) = parseShippingCost("FREE DELIVERY")
+        #expect(cost == 0.0)
+        #expect(known == true)
+    }
+
+    @Test func dollarAmountExtracted() {
+        let (cost, known) = parseShippingCost("$5.99 shipping")
+        #expect(cost == 5.99)
+        #expect(known == true)
+    }
+
+    @Test func dollarAmountWithPlus() {
+        let (cost, known) = parseShippingCost("+$4.99 shipping")
+        #expect(cost == 4.99)
+        #expect(known == true)
+    }
+
+    @Test func dollarAmountNoDecimal() {
+        let (cost, known) = parseShippingCost("$12 shipping")
+        #expect(cost == 12.0)
+        #expect(known == true)
+    }
+
+    @Test func deliveryColonFormat() {
+        let (cost, known) = parseShippingCost("Delivery: $7.99")
+        #expect(cost == 7.99)
+        #expect(known == true)
+    }
+
+    @Test func emptyStringIsUnknown() {
+        let (cost, known) = parseShippingCost("")
+        #expect(cost == nil)
+        #expect(known == false)
+    }
+
+    @Test func deliveryDateOnlyIsUnknown() {
+        let (cost, known) = parseShippingCost("Delivery by tomorrow")
+        #expect(cost == nil)
+        #expect(known == false)
+    }
+
+    @Test func totalSortOrderWithKnownShipping() {
+        // eBay $259 + $12 = $271 should sort ABOVE Amazon $279 + $0 = $279
+        let ebay = parseShippingCost("$12.00 shipping")
+        let amazon = parseShippingCost("Free shipping")
+        let ebayTotal = 259.0 + (ebay.cost ?? 0)
+        let amazonTotal = 279.99 + (amazon.cost ?? 0)
+        #expect(ebayTotal < amazonTotal)
+    }
+
+    @Test func unknownShippingFallsBackToListPrice() {
+        let (cost, known) = parseShippingCost("Ships from seller")
+        #expect(cost == nil)
+        #expect(known == false)
+        // When unknown, total = extractedPrice + 0 (no assumption of free)
+        let extractedPrice = 49.99
+        let total = extractedPrice + (cost ?? 0)
+        #expect(total == extractedPrice)
+    }
+}
+
+// MARK: — TrustLevel tests (P4.003)
+
+struct TrustLevelTests {
+
+    @Test func amazonIsMajorRetailer() {
+        #expect(TrustLevel.from("Amazon") == .majorRetailer)
+    }
+
+    @Test func ebayIsMarketplace() {
+        #expect(TrustLevel.from("eBay") == .marketplace)
+    }
+
+    @Test func unknownSourceIsUnknown() {
+        #expect(TrustLevel.from("Bob's Electronics") == .unknown)
+    }
+
+    @Test func caseInsensitiveMatch() {
+        #expect(TrustLevel.from("WALMART") == .majorRetailer)
+        #expect(TrustLevel.from("Etsy") == .marketplace)
+    }
+
+    @Test func majorRetailerHasLabel() {
+        #expect(TrustLevel.majorRetailer.label == "Major retailer")
+    }
+
+    @Test func unknownHasNoLabel() {
+        #expect(TrustLevel.unknown.label == nil)
+    }
+}
+
 // MARK: — PoisonControl tests
 
 struct PoisonControlTests {
