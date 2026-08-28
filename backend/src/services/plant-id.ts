@@ -123,6 +123,22 @@ interface GroqMessage {
 interface GroqChoice { message?: { content?: string } }
 interface GroqResponse { choices?: GroqChoice[]; error?: { message?: string } }
 
+// Retries on Groq 429 (transient TPM rate-limit) with exponential backoff.
+const PLANT_GROQ_RETRIES = 2
+
+async function fetchGroqPlantWithRetry(init: RequestInit): Promise<Response> {
+  let res!: Response
+  for (let attempt = 0; attempt <= PLANT_GROQ_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await new Promise<void>(r => setTimeout(r, attempt * 1_000))
+      console.warn(`[groq/plant] 429 rate-limited — retry ${attempt}/${PLANT_GROQ_RETRIES}`)
+    }
+    res = await fetch(GROQ_API_URL, init)
+    if (res.status !== 429) return res
+  }
+  return res
+}
+
 async function callGroqPlant(imageBase64: string, mediaType: string, apiKey: string): Promise<string> {
   const message: GroqMessage = {
     role: 'user',
@@ -131,7 +147,7 @@ async function callGroqPlant(imageBase64: string, mediaType: string, apiKey: str
       { type: 'text', text: PLANT_SPECIALIST_PROMPT },
     ],
   }
-  const res = await fetch(GROQ_API_URL, {
+  const init: RequestInit = {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -140,13 +156,22 @@ async function callGroqPlant(imageBase64: string, mediaType: string, apiKey: str
       reasoning_effort: 'none',
       messages: [message],
     }),
-  })
+  }
+  const res = await fetchGroqPlantWithRetry(init)
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(`Groq plant-specialist ${res.status}: ${body.slice(0, 300)}`)
+    console.error(`[groq/plant] status:${res.status} body:${body.slice(0, 300)}`)
+    throw new Error(
+      res.status === 429
+        ? 'Too many requests — try again in a moment'
+        : 'Plant identification temporarily unavailable',
+    )
   }
   const data = await res.json() as GroqResponse
-  if (data.error) throw new Error(`Groq plant-specialist error: ${data.error.message}`)
+  if (data.error) {
+    console.error(`[groq/plant] api error: ${data.error.message}`)
+    throw new Error('Plant identification temporarily unavailable')
+  }
   return data.choices?.[0]?.message?.content ?? ''
 }
 
