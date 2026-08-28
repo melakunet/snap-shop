@@ -126,6 +126,7 @@ struct SavedView: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Set price alert for \(item.productName)")
         }
         .padding(.vertical, Spacing.xs)
     }

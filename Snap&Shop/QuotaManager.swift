@@ -4,7 +4,11 @@ import Foundation
 /// Pro users bypass all quota checks; this manager is only consulted for
 /// non-Pro sessions.
 enum QuotaManager {
-    static let freeLimit = 300
+    #if DEBUG
+    static let freeLimit = 300  // inflated for device/simulator testing; Release builds get 10
+    #else
+    static let freeLimit = 10
+    #endif
 
     private static let kCount = "quota_precision_count"
     private static let kMonth = "quota_precision_month"

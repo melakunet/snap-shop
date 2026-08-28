@@ -13,6 +13,7 @@ enum ScanMode {
 struct CameraView: View {
     @StateObject private var session = CameraSession()
     @EnvironmentObject private var proStatus: ProStatus
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showPaywall = false
     @State private var scanMode: ScanMode = .precision
     @State private var isScanning = false
@@ -304,12 +305,14 @@ struct CameraView: View {
     private var topBar: some View {
         HStack {
             circleButton("xmark") {}
+                .accessibilityHidden(true)
             Spacer()
             Image("AppLogo")
                 .resizable()
                 .scaledToFit()
                 .frame(width: 28, height: 28)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityHidden(true)
             Spacer()
             flashToggleButton
         }
@@ -335,6 +338,8 @@ struct CameraView: View {
                 .background(Color.white.opacity(0.12))
                 .clipShape(Circle())
         }
+        .accessibilityLabel(flashOn ? "Flash on" : "Flash off")
+        .accessibilityHint("Double-tap to toggle flash")
     }
 
     // MARK: — Mode toggle
@@ -356,6 +361,7 @@ struct CameraView: View {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .semibold))
+                    .accessibilityHidden(true)
                 Text(label)
                     .font(Typography.callout.weight(active ? .semibold : .regular))
             }
@@ -384,6 +390,7 @@ struct CameraView: View {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "barcode.viewfinder")
                     .font(.system(size: 13, weight: .semibold))
+                    .accessibilityHidden(true)
                 Text("Barcode found — tap to price")
                     .font(Typography.caption.weight(.semibold))
             }
@@ -467,7 +474,7 @@ struct CameraView: View {
                 .scaleEffect(deepPulse ? 1.05 : 0.98)
                 .opacity(deepPulse ? 0.0 : 1.0)
                 .animation(
-                    .easeOut(duration: 1.6).repeatForever(autoreverses: false),
+                    reduceMotion ? nil : .easeOut(duration: 1.6).repeatForever(autoreverses: false),
                     value: deepPulse
                 )
 
@@ -561,6 +568,7 @@ struct CameraView: View {
                         .background(Color.white.opacity(0.12))
                         .clipShape(Circle())
                 }
+                .accessibilityLabel("Choose photo from library")
             } else {
                 PhotosPicker(
                     selection: $selectedVideoItem,
@@ -574,6 +582,7 @@ struct CameraView: View {
                         .background(Color.white.opacity(0.12))
                         .clipShape(Circle())
                 }
+                .accessibilityLabel("Choose video from library")
             }
 
             Spacer()
@@ -585,7 +594,7 @@ struct CameraView: View {
                         .frame(width: 92, height: 92)
                         .scaleEffect(isScanning ? 1.15 : 1.0)
                         .animation(
-                            .easeInOut(duration: 0.85).repeatForever(autoreverses: true),
+                            reduceMotion ? nil : .easeInOut(duration: 0.85).repeatForever(autoreverses: true),
                             value: isScanning
                         )
                 }
@@ -630,6 +639,10 @@ struct CameraView: View {
                 .scaleEffect(isScanning || session.isCapturing ? 0.88 : 1.0)
                 .animation(.spring(duration: 0.2), value: isScanning)
                 .animation(.spring(duration: 0.2), value: session.isCapturing)
+                .accessibilityLabel(
+                    scanMode == .precision ? "Take photo" :
+                    (isScanning ? "Stop recording" : "Start recording")
+                )
             }
 
             Spacer()
@@ -648,6 +661,7 @@ struct CameraView: View {
                     .background(Color.white.opacity(0.12))
                     .clipShape(Circle())
             }
+            .accessibilityLabel(scanMode == .precision ? "Import image from Files" : "Import video from Files")
         }
         .padding(.horizontal, Spacing.xl)
     }
@@ -722,6 +736,7 @@ struct CameraView: View {
                     .font(.system(size: 16))
                     .foregroundStyle(Color.Brand.accent)
             }
+            .accessibilityLabel("Stop listening")
             .transition(.opacity)
         } else if searchFocused || !searchQuery.isEmpty {
             Button("Search") { submitTextSearch() }
@@ -739,6 +754,8 @@ struct CameraView: View {
                     .font(.system(size: 16))
                     .foregroundStyle(.white.opacity(0.7))
             }
+            .accessibilityLabel("Voice input")
+            .accessibilityHint("Double-tap to speak a search")
             .transition(.opacity)
         }
     }

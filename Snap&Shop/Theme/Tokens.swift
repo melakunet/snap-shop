@@ -46,10 +46,15 @@ extension Color {
         })
 
         // MARK: Accent
-        // Gold (#C8A86B) on ivory yields ~2.1:1 contrast — fails WCAG AA for body text.
+        // Adaptive: dark mode uses champagne gold (~8:1 on dark ✓);
+        // light mode uses deep gold (#856127, ~5.5:1 on white ✓). Both pass WCAG AA.
 
-        /// #C8A86B — champagne gold
-        static let accent = Color(UIColor(red: 200, green: 168, blue: 107))
+        /// Adaptive gold — WCAG AA ✓ in both color-scheme appearances
+        static let accent = Color(UIColor { traitCollection in
+            traitCollection.userInterfaceStyle == .dark
+                ? UIColor(red: 200, green: 168, blue: 107)  // #C8A86B champagne gold
+                : UIColor(red: 133, green: 97, blue: 39)     // #856127 deep gold
+        })
         /// #9A7B43 — deeper gold for pressed / active states
         static let accentDeep = Color(UIColor(red: 154, green: 123, blue: 67))
         /// #1A1A1A — text / icon ON a gold surface (contrast ~7.3:1, AA ✓)
@@ -81,12 +86,12 @@ private extension UIColor {
 // MARK: - Typography Tokens
 
 enum Typography {
-    static let display: Font = .system(size: 34, weight: .bold, design: .serif)
-    static let title: Font = .system(size: 28, weight: .bold, design: .serif)
-    static let headline: Font = .system(size: 22, weight: .semibold, design: .serif)
-    static let body: Font = .system(size: 17, weight: .regular, design: .default)
-    static let callout: Font = .system(size: 15, weight: .regular, design: .default)
-    static let caption: Font = .system(size: 13, weight: .regular, design: .default)
+    static let display: Font = .system(.largeTitle, design: .serif, weight: .bold)
+    static let title: Font = .system(.title, design: .serif, weight: .bold)
+    static let headline: Font = .system(.title2, design: .serif, weight: .semibold)
+    static let body: Font = .system(.body, design: .default, weight: .regular)
+    static let callout: Font = .system(.subheadline, design: .default, weight: .regular)
+    static let caption: Font = .system(.footnote, design: .default, weight: .regular)
 }
 
 // MARK: - Spacing Tokens (4-pt base grid)

@@ -795,6 +795,24 @@ struct ResultsView: View {
             priceRowContent(result)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(productCardA11yLabel(result))
+    }
+
+    private func productCardA11yLabel(_ result: PriceResult) -> String {
+        var parts: [String] = []
+        parts.append(result.title ?? result.retailer)
+        parts.append(result.price)
+        if result.shippingKnown, let cost = result.shippingCost, cost > 0 {
+            parts.append(String(format: "total $%.2f with shipping", result.totalPrice))
+        } else if result.shippingKnown {
+            parts.append("free shipping")
+        }
+        parts.append("from \(result.retailer)")
+        if let label = result.trustLevel.label { parts.append(label) }
+        if let r = result.rating { parts.append(String(format: "%.1f stars", r)) }
+        if let count = result.reviewCount { parts.append("\(count.formatted()) reviews") }
+        if result.isBest { parts.append("best match") }
+        return parts.joined(separator: ", ")
     }
 
     private func priceRowContent(_ result: PriceResult) -> some View {
@@ -1533,6 +1551,7 @@ struct ResultsView: View {
                             .foregroundStyle(Color.Brand.accent)
                             .symbolEffect(.bounce, value: currentlySaved)
                     }
+                    .accessibilityLabel(currentlySaved ? "Remove from saved" : "Save item")
                 }
             }
         }
@@ -1610,6 +1629,7 @@ private struct CenteredStateConfig {
 
 private struct ShimmerRect: View {
     @State private var isShimmering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var height: CGFloat
 
     var body: some View {
@@ -1618,6 +1638,7 @@ private struct ShimmerRect: View {
             .frame(height: height)
             .opacity(isShimmering ? 0.4 : 0.9)
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
                     isShimmering = true
                 }

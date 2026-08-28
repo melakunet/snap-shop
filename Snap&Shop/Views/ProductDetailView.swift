@@ -133,6 +133,7 @@ struct ProductDetailView: View {
             if let r = result.rating {
                 HStack(spacing: Spacing.xs) {
                     starRow(rating: r, size: 13)
+                        .accessibilityHidden(true)
                     Text(String(format: "%.1f", r))
                         .font(Typography.callout.weight(.semibold))
                         .foregroundStyle(Color.Brand.textPrimary)
@@ -142,6 +143,12 @@ struct ProductDetailView: View {
                             .foregroundStyle(Color.Brand.textSecondary)
                     }
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel({
+                    var label = String(format: "%.1f out of 5 stars", r)
+                    if let count = result.reviewCount { label += ", \(count.formatted()) reviews" }
+                    return label
+                }())
             }
             if !result.shipping.isEmpty {
                 HStack(spacing: Spacing.xs) {
@@ -248,6 +255,7 @@ struct ProductDetailView: View {
     private func reviewsHeader(_ reviews: ProductReviews) -> some View {
         HStack(spacing: Spacing.sm) {
             starRow(rating: reviews.rating, size: 15)
+                .accessibilityHidden(true)
             Text(String(format: "%.1f", reviews.rating))
                 .font(Typography.callout.weight(.bold))
                 .foregroundStyle(Color.Brand.textPrimary)
@@ -255,12 +263,15 @@ struct ProductDetailView: View {
                 .font(Typography.caption)
                 .foregroundStyle(Color.Brand.textSecondary)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(String(format: "%.1f out of 5 stars, %@ reviews", reviews.rating, reviews.reviewCount.formatted()))
     }
 
     private func breakdownBars(_ bd: RatingBreakdown) -> some View {
         let maxCount = bd.counts.map(\.count).max() ?? 1
         return VStack(spacing: Spacing.xs) {
             ForEach(bd.counts, id: \.stars) { stars, count in
+                let pct = bd.total > 0 ? Int(Double(count) / Double(bd.total) * 100) : 0
                 HStack(spacing: Spacing.sm) {
                     Text("\(stars)★")
                         .font(Typography.caption)
@@ -276,12 +287,13 @@ struct ProductDetailView: View {
                         }
                     }
                     .frame(height: 8)
-                    let pct = bd.total > 0 ? Int(Double(count) / Double(bd.total) * 100) : 0
                     Text("\(pct)%")
                         .font(Typography.caption)
                         .foregroundStyle(Color.Brand.textSecondary)
                         .frame(width: 36, alignment: .trailing)
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(stars) stars, \(pct) percent")
             }
         }
     }
@@ -298,6 +310,7 @@ struct ProductDetailView: View {
                 HStack(spacing: Spacing.sm) {
                     if let r = review.rating {
                         starRow(rating: r, size: 10)
+                            .accessibilityHidden(true)
                     }
                     if let date = review.date {
                         Text(date)

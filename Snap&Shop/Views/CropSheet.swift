@@ -177,6 +177,17 @@ struct CropSheet: View {
             .shadow(color: .black.opacity(0.35), radius: 3)
             .position(point)
             .gesture(cornerGesture(corner, frame: frame))
+            .accessibilityLabel("\(cornerAccessibilityLabel(corner)) crop handle")
+            .accessibilityHint("Drag to resize the crop area")
+    }
+
+    private func cornerAccessibilityLabel(_ corner: Corner) -> String {
+        switch corner {
+        case .topLeft:     return "Top-left"
+        case .topRight:    return "Top-right"
+        case .bottomLeft:  return "Bottom-left"
+        case .bottomRight: return "Bottom-right"
+        }
     }
 
     // MARK: — Gestures

@@ -108,6 +108,7 @@ struct HistoryView: View {
         return HStack(spacing: 3) {
             Image(systemName: isDeep ? "video.fill" : "camera.aperture")
                 .font(.system(size: 9, weight: .semibold))
+                .accessibilityHidden(true)
             Text(isDeep ? "Deep" : "Precision")
                 .font(Typography.caption.weight(.medium))
         }

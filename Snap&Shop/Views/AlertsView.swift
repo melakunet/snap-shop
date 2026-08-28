@@ -107,6 +107,7 @@ struct AlertsView: View {
                     Image(systemName: "bell.fill")
                         .font(.system(size: 20))
                         .foregroundStyle(Color.Brand.success)
+                        .accessibilityHidden(true)
                     Text("Fired!")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(Color.Brand.success)
@@ -115,6 +116,7 @@ struct AlertsView: View {
                 Image(systemName: "bell")
                     .font(.system(size: 20))
                     .foregroundStyle(Color.Brand.textSecondary.opacity(0.5))
+                    .accessibilityHidden(true)
             }
         }
         .padding(.vertical, Spacing.xs)

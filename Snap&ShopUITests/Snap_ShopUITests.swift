@@ -1,43 +1,69 @@
-//
-//  Snap_ShopUITests.swift
-//  Snap&ShopUITests
-//
-//  Created by Etefworkie Melaku on 2026-05-29.
-//
-
 import XCTest
 
 final class Snap_ShopUITests: XCTestCase {
 
+    var app: XCUIApplication!
+
     override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-
-        // In UI tests it is usually best to stop immediately when a failure occurs.
         continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
+        app = XCUIApplication()
+        // Skip onboarding and auth so the camera tab is the first thing rendered.
+        app.launchArguments += ["-UITesting"]
+        app.launch()
     }
 
     override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
+        app = nil
+    }
+
+    // MARK: — Launch
+
+    @MainActor
+    func testAppLaunchCameraViewIsVisible() throws {
+        // Shutter button is the defining element of CameraView; its accessibility label
+        // is set by P4.007. At least one of these labels must be present within 5 s.
+        let shutter = app.buttons.matching(
+            NSPredicate(format: "label IN %@", ["Take photo", "Start recording"])
+        ).firstMatch
+        XCTAssertTrue(
+            shutter.waitForExistence(timeout: 5),
+            "Shutter button with accessibility label not found — CameraView may not have loaded"
+        )
+    }
+
+    // MARK: — Camera control VoiceOver labels (P4.007 / P4.008)
+
+    @MainActor
+    func testCameraFlashButtonHasAccessibilityLabel() throws {
+        let flash = app.buttons.matching(
+            NSPredicate(format: "label IN %@", ["Flash on", "Flash off"])
+        ).firstMatch
+        XCTAssertTrue(
+            flash.waitForExistence(timeout: 5),
+            "Flash toggle button must expose 'Flash on' or 'Flash off' to VoiceOver"
+        )
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
-        let app = XCUIApplication()
-        app.launch()
-
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+    func testScanModeButtonsHaveAccessibilityLabels() throws {
+        XCTAssertTrue(
+            app.buttons["Precision"].waitForExistence(timeout: 5),
+            "Precision mode button accessibility label missing"
+        )
+        XCTAssertTrue(
+            app.buttons["Deep"].waitForExistence(timeout: 5),
+            "Deep mode button accessibility label missing"
+        )
     }
+
+    // MARK: — Launch performance
 
     @MainActor
     func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
+            let a = XCUIApplication()
+            a.launchArguments += ["-UITesting"]
+            a.launch()
         }
     }
 }

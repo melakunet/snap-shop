@@ -6,6 +6,19 @@ struct ContentView: View {
     @EnvironmentObject private var authState: AuthState
 
     var body: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-UITesting") {
+            RootTabView(selectedTab: $selectedTab)
+        } else {
+            mainFlow
+        }
+        #else
+        mainFlow
+        #endif
+    }
+
+    @ViewBuilder
+    private var mainFlow: some View {
         if !hasOnboarded {
             OnboardingView { hasOnboarded = true }
         } else if !authState.isSignedIn {
