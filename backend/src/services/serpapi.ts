@@ -33,6 +33,43 @@ interface SerpResult {
   product_id?: string
 }
 
+// Google Shopping `link` fields are aggregation pages (google.com/shopping/product/...) that
+// expire when a listing is delisted, showing "Details aren't available for this product."
+// Detect them and replace with a stable retailer search URL so the button always goes somewhere.
+const RETAILER_SEARCH: Array<[string, (q: string) => string]> = [
+  ['amazon',     q => `https://www.amazon.com/s?k=${q}`],
+  ['walmart',    q => `https://www.walmart.com/search?q=${q}`],
+  ['target',     q => `https://www.target.com/s?searchTerm=${q}`],
+  ['best buy',   q => `https://www.bestbuy.com/site/searchpage.jsp?st=${q}`],
+  ['bestbuy',    q => `https://www.bestbuy.com/site/searchpage.jsp?st=${q}`],
+  ['ebay',       q => `https://www.ebay.com/sch/i.html?_nkw=${q}`],
+  ['home depot', q => `https://www.homedepot.com/s/${q}`],
+  ['b&h',        q => `https://www.bhphotovideo.com/c/search?q=${q}`],
+  ['etsy',       q => `https://www.etsy.com/search?q=${q}`],
+  ['adidas',     q => `https://www.adidas.com/us/search?q=${q}`],
+  ['nike',       q => `https://www.nike.com/search?q=${q}`],
+]
+
+function isGoogleOwnedUrl(url: string): boolean {
+  return (
+    url.includes('google.com/shopping') ||
+    url.includes('google.com/aclk') ||
+    url.includes('googleadservices.com') ||
+    url.includes('google.com/url')
+  )
+}
+
+function resolveLink(raw: string, source: string, query: string): string {
+  if (!raw || isGoogleOwnedUrl(raw)) {
+    const src = source.toLowerCase()
+    const match = RETAILER_SEARCH.find(([key]) => src.includes(key))
+    return match
+      ? match[1](encodeURIComponent(query))
+      : `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(query)}`
+  }
+  return raw
+}
+
 interface SerpAPIResponse {
   shopping_results?: SerpResult[]
   error?: string
@@ -85,7 +122,7 @@ export async function fetchShoppingResults(
       extracted_price: r.extracted_price ?? 0,
       delivery: r.delivery ?? '',
       source: r.source ?? '',
-      link: r.link ?? r.product_link ?? '',
+      link: resolveLink(r.link ?? r.product_link ?? '', r.source ?? '', query),
       thumbnail: r.thumbnail ?? '',
       ...(r.rating != null ? { rating: r.rating } : {}),
       ...(r.reviews != null ? { review_count: r.reviews } : {}),

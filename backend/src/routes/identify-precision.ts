@@ -99,8 +99,16 @@ route.post('/', async (c) => {
       const specialist = await identifyPlantSpecies(imageBase64, file.type, c.env)
 
       if (!specialist) {
-        // GROQ_API_KEY absent or parse failed both attempts — return plain result
-        return c.json(groqResult)
+        // Specialist call failed (rate-limited or parse error). We know this image is plant-like
+        // but can't confirm species or safety — return honest 422 rather than falling through
+        // to shopping for a potentially dangerous plant.
+        return c.json(
+          errorBody(
+            'plant_unidentified',
+            "Couldn't confirm the plant species — try again or use Deep Scan. Never eat or touch unfamiliar plants.",
+          ),
+          422,
+        )
       }
 
       // Unknown species — honest 422, never fall through to shopping

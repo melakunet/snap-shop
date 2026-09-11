@@ -292,6 +292,7 @@ struct PoisonControlTests {
 
 // MARK: — QuotaManager tests (P4.008)
 
+@Suite(.serialized)
 struct QuotaManagerTests {
 
     // Keys are internal to QuotaManager, but known from source; used for rollover simulation.
@@ -554,6 +555,7 @@ struct OtherItemDecodingTests {
 
 // MARK: — ProStatus Force-Pro tests (P4.008)
 
+@Suite(.serialized)
 struct ProStatusTests {
 
     @Test func forceProKeyRoundTrips() {

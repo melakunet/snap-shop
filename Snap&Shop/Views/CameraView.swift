@@ -41,6 +41,7 @@ struct CameraView: View {
     @State private var frameFromVideo: Data? = nil
     @State private var showVideoFrameCrop = false
     @State private var deepScanEscalationHint: String? = nil
+    @State private var shouldNavigateAfterTranscript = false
     #if DEBUG
     @State private var isDebugScanning = false
     @State private var debugTask: Task<Void, Never>?
@@ -52,7 +53,14 @@ struct CameraView: View {
 
     var body: some View {
         mainStack
-            .sheet(isPresented: $showTranscriptSheet) { transcriptSheet }
+            .sheet(isPresented: $showTranscriptSheet, onDismiss: {
+                // Navigate only after the sheet has fully dismissed — same pattern as fullScreenCover
+                // flows above; simultaneous dismiss + push drops the navigation push in SwiftUI.
+                if shouldNavigateAfterTranscript {
+                    shouldNavigateAfterTranscript = false
+                    showResults = true
+                }
+            }) { transcriptSheet }
             .onChange(of: transcriber.partialTranscript) { _, partial in handlePartialTranscript(partial) }
             .onChange(of: transcriber.phase) { _, phase in handlePhaseChange(phase) }
             .onChange(of: showTranscriptSheet) { _, showing in
@@ -835,15 +843,15 @@ struct CameraView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Skip") {
                         voiceHint = ""
+                        shouldNavigateAfterTranscript = true
                         showTranscriptSheet = false
-                        showResults = true
                     }
                     .foregroundStyle(Color.Brand.textSecondary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Start Scan") {
+                        shouldNavigateAfterTranscript = true
                         showTranscriptSheet = false
-                        showResults = true
                     }
                     .font(Typography.callout.weight(.semibold))
                     .foregroundStyle(Color.Brand.accent)

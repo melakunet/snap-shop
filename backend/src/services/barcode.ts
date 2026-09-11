@@ -60,6 +60,39 @@ async function lookupGoogleBooks(isbn: string): Promise<BarcodeResult | null> {
   }
 }
 
+// ── Open Library (ISBN only, no key required) ────────────────────────────
+
+interface OpenLibraryBook {
+  title?: string
+  authors?: Array<{ name: string }>
+  cover?: { small?: string; medium?: string; large?: string }
+}
+
+async function lookupOpenLibrary(isbn: string): Promise<BarcodeResult | null> {
+  try {
+    const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const data = await res.json() as Record<string, OpenLibraryBook>
+    const book = data[`ISBN:${isbn}`]
+    if (!book?.title) return null
+    const title = book.title
+    const authors = book.authors?.map((a) => a.name).join(', ') ?? ''
+    const image =
+      book.cover?.medium?.replace('http://', 'https://') ??
+      book.cover?.large?.replace('http://', 'https://')
+    return {
+      name: title,
+      brand: authors,
+      image,
+      confidence: 0.99,
+      search_query: authors ? `${title} ${authors} book` : `${title} book`,
+    }
+  } catch {
+    return null
+  }
+}
+
 // ── Open Food Facts (food/grocery, no key required) ──────────────────────
 
 interface OpenFoodFactsProduct {
@@ -133,9 +166,14 @@ async function lookupUPCItemDb(barcode: string, key: string): Promise<BarcodeRes
 
 export async function lookupBarcode(barcode: string, env: Env): Promise<BarcodeResult | null> {
   if (isISBN(barcode)) {
-    // Books: Google Books first (free, covers virtually all ISBNs)
-    const book = await lookupGoogleBooks(barcode)
-    if (book) return book
+    // Run Google Books + Open Library in parallel — take the first hit.
+    // Running in parallel means a miss on one source costs no extra wall-clock time.
+    const [googleResult, olResult] = await Promise.all([
+      lookupGoogleBooks(barcode),
+      lookupOpenLibrary(barcode),
+    ])
+    if (googleResult) return googleResult
+    if (olResult) return olResult
     // UPCitemdb as last resort if key is available
     if (env.UPCITEMDB_KEY) return lookupUPCItemDb(barcode, env.UPCITEMDB_KEY)
     return null

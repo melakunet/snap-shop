@@ -278,9 +278,9 @@ struct ResultsView: View {
                     }
                 }
 
-                // For plant scans with no shopping results, still enter loaded state
-                // so the species card and warning card render (productResult?.plant != nil).
-                if priceResults.isEmpty && productResult?.plant == nil {
+                // Show loaded state whenever a product was identified, even with empty prices
+                // (price timeout or no results). Empty state is reserved for no product + no prices.
+                if priceResults.isEmpty && productResult == nil {
                     phase = .empty
                 } else {
                     phase = .loaded(priceResults)
