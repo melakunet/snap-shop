@@ -1,22 +1,124 @@
-# Snap&Shop
+# Snap & Shop
 
 [![CI](https://github.com/melakunet/Snap-Shop/actions/workflows/ci.yml/badge.svg)](https://github.com/melakunet/Snap-Shop/actions/workflows/ci.yml)
-Snap &amp; Shop — native iOS app that identifies products from a photo or short video and shows live prices across Amazon, Walmart, Best Buy &amp; more. Dual-tier scanning: Precision (single-photo) + Deep/Video (multimodal). SwiftUI · AVFoundation · SwiftData. triOS MWDMC capstone.
 
-General Functionality
-• Dual-mode camera scanning — Precision Scan for single high-accuracy photos, Deep / Video Scan for video
-pans, multi-image bursts, and text hints.
-• Seamless in-camera mode selector (Photo / Precision ↔ Video / Deep) built directly into the
-AVFoundation capture view.
-• Live price comparison across Amazon, Walmart, Best Buy, eBay, Target, B&H and more via SerpAPI Google
-Shopping.
-• Ranked results card showing best price, total price with shipping, rating, and direct retailer links.
-• Trusted-retailer whitelist so users only see results from stores they actually shop at.
-• Scan history with thumbnail, product name, mode used, date, and lowest price seen.
-• Saved favorites with price-drop indicator on re-scan.
-• Sign in with Apple for one-tap account creation (privacy-respecting, no passwords).
-• Local-first storage with SwiftData; optional iCloud sync for multi-device access.
-• Manual text search fallback when camera lighting is poor.
-• Polished 3-slide onboarding flow that introduces both scan modes and the privacy promise, plus empty
-states for first-launch UX.
-• Dark mode support, accessible color contrast, VoiceOver labels, and Dynamic Type.
+> AI-powered shopping assistant iOS app — scan products, barcodes, or video to instantly find prices across retailers. Built with SwiftUI, Cloudflare Workers, Gemini 2.5, and Groq vision.
+
+Capstone project — triOS College, 2026
+
+---
+
+## What It Does
+
+Point your camera at any product and Snap & Shop identifies it and shows you the best prices from retailers like Amazon, eBay, and Best Buy — in seconds.
+
+| Scan Mode | How It Works |
+|-----------|-------------|
+| **Photo** | Tap to capture — Groq vision identifies the product |
+| **Barcode** | Point at any EAN-13, UPC, or ISBN barcode for instant lookup |
+| **Video (Deep Scan)** | Record a 10-second clip — Gemini 2.5 analyses multiple frames for hard-to-identify items |
+| **Paste a Link** | Drop a product URL and get comparison prices instantly |
+
+---
+
+## Features
+
+- **Multi-modal scanning** — photo, barcode, video, and URL
+- **Real-time price comparison** — Best Buy, eBay, Amazon, and more via Google Shopping
+- **Plant identification** — species detection with safety warnings for dangerous plants
+- **Book lookup** — ISBN barcodes resolved via Google Books and Open Library
+- **Scan history** — every result saved locally with thumbnail
+- **Price alerts** — get notified when a saved item drops in price
+- **Pro tier** — unlimited scans via StoreKit 2 in-app purchase
+- **Sign in with Apple** — private, secure authentication
+- **Dark mode** — full support with accessible color contrast and Dynamic Type
+
+---
+
+## Tech Stack
+
+**iOS**
+- Swift / SwiftUI (iOS 18+)
+- AVFoundation — camera, barcode scanning, video recording
+- StoreKit 2 — in-app purchases
+- Sign in with Apple
+
+**Backend** *(Cloudflare Workers)*
+- [Gemini 2.5 Flash / Pro](https://deepmind.google/technologies/gemini/) — deep video identification
+- [Groq](https://groq.com/) — fast vision inference for photo scans
+- [SerpAPI](https://serpapi.com/) — Google Shopping results
+- Best Buy API + eBay API — direct retailer pricing
+- Google Books + Open Library — ISBN lookups
+
+---
+
+## Architecture
+
+```
+iOS App (SwiftUI)
+    │
+    ├── CameraView        — capture photo / video / barcode
+    ├── ResultsView       — price cards, product info, plant warnings
+    ├── BackendClient     — URLSession calls to Cloudflare Worker
+    │
+    └── Backend (Workers)
+            ├── /identify/precision   — Groq vision + barcode + plant specialist
+            ├── /identify/deep        — Gemini 2.5 multi-frame analysis
+            ├── /shop                 — Best Buy + eBay + SerpAPI price aggregation
+            └── /transcribe           — Whisper audio hint for deep scans
+```
+
+---
+
+## Getting Started
+
+### Prerequisites
+- Xcode 16+
+- iOS 18 device or simulator
+- Node.js 20+ (for backend)
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) (`npm i -g wrangler`)
+
+### Backend
+```bash
+cd backend
+npm install
+npx wrangler dev        # local dev
+npx wrangler deploy     # deploy to Cloudflare
+```
+
+Set these secrets in the Cloudflare dashboard:
+```
+GEMINI_API_KEY
+GROQ_API_KEY
+SERPAPI_KEY
+```
+
+### iOS App
+1. Open `Snap&Shop.xcodeproj` in Xcode
+2. Set your Team in Signing & Capabilities
+3. Update `AppConfig.swift` with your Worker URL
+4. Press `Cmd+R` to build and run
+
+---
+
+## Project Structure
+
+```
+Snap&Shop/
+├── Auth/           — Sign in with Apple, Keychain
+├── Models/         — ShopItem, IdentifyResult, ScanRecord, etc.
+├── Network/        — BackendClient, AppConfig
+├── Scan/           — CameraSession, ImageCropper, SpeechTranscriber
+├── Views/          — CameraView, ResultsView, PaywallView, SettingsView, …
+└── Theme/          — Design tokens, colors, typography
+
+backend/
+├── src/routes/     — identify-precision, identify-deep, shop, transcribe
+└── src/services/   — gemini, groq, serpapi, barcode, plant-id, bestbuy, ebay
+```
+
+---
+
+## License
+
+Academic project — triOS College, 2026. Not licensed for commercial use.
