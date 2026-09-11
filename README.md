@@ -14,16 +14,17 @@ Point your camera at any product and Snap & Shop identifies it and shows you the
 
 | Scan Mode | How It Works |
 |-----------|-------------|
-| **Photo** | Tap to capture — Groq vision identifies the product |
-| **Barcode** | Point at any EAN-13, UPC, or ISBN barcode for instant lookup |
-| **Video (Deep Scan)** | Record a 10-second clip — Gemini 2.5 analyses multiple frames for hard-to-identify items |
-| **Paste a Link** | Drop a product URL and get comparison prices instantly |
+| **Photo** | Apple Vision OCR reads on-device text, Groq vision identifies the product |
+| **Barcode** | AVFoundation detects EAN-13, UPC, and ISBN barcodes fully on-device — no AI required |
+| **Video (Deep Scan)** | Gemini 2.5 analyses multiple frames for complex or hard-to-identify items |
+| **Paste a Link** | Resolves the product URL and fetches live comparison prices instantly |
 
 ---
 
 ## Features
 
 - **Multi-modal scanning** — photo, barcode, video, and URL
+- **On-device processing** — barcodes and OCR run locally via AVFoundation and Apple Vision; no data sent for those steps
 - **Real-time price comparison** — Best Buy, eBay, Amazon, and more via Google Shopping
 - **Plant identification** — species detection with safety warnings for dangerous plants
 - **Book lookup** — ISBN barcodes resolved via Google Books and Open Library
@@ -37,13 +38,14 @@ Point your camera at any product and Snap & Shop identifies it and shows you the
 
 ## Tech Stack
 
-**iOS**
+**iOS (On-Device)**
 - Swift / SwiftUI (iOS 18+)
 - AVFoundation — camera, barcode scanning, video recording
+- Apple Vision — on-device OCR for text extraction
 - StoreKit 2 — in-app purchases
 - Sign in with Apple
 
-**Backend** *(Cloudflare Workers)*
+**Backend** *(Cloudflare Workers — Cloud AI)*
 - [Gemini 2.5 Flash / Pro](https://deepmind.google/technologies/gemini/) — deep video identification
 - [Groq](https://groq.com/) — fast vision inference for photo scans
 - [SerpAPI](https://serpapi.com/) — Google Shopping results
@@ -57,7 +59,8 @@ Point your camera at any product and Snap & Shop identifies it and shows you the
 ```
 iOS App (SwiftUI)
     │
-    ├── CameraView        — capture photo / video / barcode
+    ├── CameraView        — AVFoundation capture: photo / video / barcode
+    ├── ImageCropper      — Apple Vision OCR (on-device text recognition)
     ├── ResultsView       — price cards, product info, plant warnings
     ├── BackendClient     — URLSession calls to Cloudflare Worker
     │
