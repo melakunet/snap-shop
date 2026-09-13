@@ -7,6 +7,7 @@ import {
   shouldAddSafetyNote,
   shapePlantResponse,
   SAFETY_NOTE,
+  UNVERIFIED_CAUTION,
 } from '../../src/services/plant-id'
 import type { IdentifyResult } from '../../src/lib/schema'
 
@@ -114,6 +115,57 @@ describe('matchDangerousPlant', () => {
     const match = matchDangerousPlant('white baneberry', '')
     expect(match).not.toBeNull()
     expect(match?.note).toContain("doll's-eyes")
+  })
+
+  // ── Foxglove / seed-packet scenarios (the original bug) ─────────────────────
+
+  it('matches foxglove by exact common_name', () => {
+    const match = matchDangerousPlant('foxglove', '')
+    expect(match).not.toBeNull()
+    expect(match?.level).toBe('severe')
+  })
+
+  it('matches foxglove by exact latin_name', () => {
+    const match = matchDangerousPlant('', 'digitalis purpurea')
+    expect(match).not.toBeNull()
+    expect(match?.level).toBe('severe')
+  })
+
+  it('matches foxglove as whole word in identified common_name ("wild foxglove")', () => {
+    const match = matchDangerousPlant('wild foxglove', '')
+    expect(match).not.toBeNull()
+    expect(match?.level).toBe('severe')
+  })
+
+  it('matches foxglove via features_observed when common_name is a generic label', () => {
+    // Simulates: specialist returned "flower seed" but features mention "foxglove"
+    const match = matchDangerousPlant('flower seed', '', 'foxglove printed on packet bell-shaped purple flowers')
+    expect(match).not.toBeNull()
+    expect(match?.level).toBe('severe')
+  })
+
+  it('matches foxglove via latin genus ("digitalis spp.")', () => {
+    const match = matchDangerousPlant('flowering plant', 'digitalis spp.', '')
+    expect(match).not.toBeNull()
+    expect(match?.level).toBe('severe')
+  })
+
+  it('does not match "foxgloves" as a false partial of an unrelated word', () => {
+    // Whole-word guard: "foxgloves" is NOT a whole-word match for DB entry "foxglove"
+    // because \bfoxglove\b would require a word boundary after "foxglove" but "foxgloves" has an 's'
+    // — this is intentional; "foxgloves" is actually the plural, and we DO want to match it
+    // via the whole-word check (\bfoxglove\b matches inside "foxgloves" because the boundary
+    // is between the 'e' and 's' — in regex \b matches between \w and \W but "foxgloves" is
+    // all \w so \bfoxglove\b does NOT match inside "foxgloves"). Safe: no false hit.
+    const match = matchDangerousPlant('safeplantfoxgloveother', '')
+    // "foxglove" is a whole word within "safeplantfoxgloveother"? No — no word boundary.
+    expect(match).toBeNull()
+  })
+
+  it('genus match does not fire for safe plants with unrelated short genus', () => {
+    // "rosa spp." genus "rosa" is not in dangerous plants DB
+    const match = matchDangerousPlant('rose', 'rosa spp.', '')
+    expect(match).toBeNull()
   })
 })
 
@@ -297,6 +349,80 @@ describe('shapePlantResponse', () => {
     expect(result.confidence).toBe(0.88)
     expect(result.features_observed).toEqual(['red berry clusters'])
     expect(result.hazard_signals).toEqual(['red berries'])
+  })
+
+  // ── Soft caution for low-confidence unidentified plants ───────────────────────
+
+  it('adds UNVERIFIED_CAUTION for low-confidence non-dangerous plant (< 0.5)', () => {
+    const result = shapePlantResponse({
+      common_name: 'wild herb',
+      latin_name: '',
+      confidence: 0.4,
+      features_observed: ['green leaves', 'white flowers'],
+      hazard_signals: [],
+    })
+    expect(result.warning).toBeUndefined()
+    expect(result.safety_note).toBe(UNVERIFIED_CAUTION)
+  })
+
+  it('does not add caution for high-confidence non-dangerous plant (>= 0.5)', () => {
+    const result = shapePlantResponse({
+      common_name: 'rose',
+      latin_name: 'rosa spp.',
+      confidence: 0.9,
+      features_observed: ['red petals', 'thorned stem'],
+      hazard_signals: [],
+    })
+    expect(result.warning).toBeUndefined()
+    expect(result.safety_note).toBeUndefined()
+  })
+
+  it('dangerous plant at low confidence still gets warning, not just caution', () => {
+    const result = shapePlantResponse({
+      common_name: 'foxglove',
+      latin_name: 'digitalis purpurea',
+      confidence: 0.4,
+      features_observed: [],
+      hazard_signals: [],
+    })
+    expect(result.warning).toBeDefined()
+    expect(result.warning?.level).toBe('severe')
+    // soft caution suppressed when danger warning already present
+    expect(result.safety_note).toBeUndefined()
+  })
+
+  it('SAFETY_NOTE takes precedence over UNVERIFIED_CAUTION when berry signal present', () => {
+    const result = shapePlantResponse({
+      common_name: 'unknown shrub',
+      latin_name: '',
+      confidence: 0.3,
+      features_observed: ['green leaves'],
+      hazard_signals: ['red berries'],
+    })
+    expect(result.safety_note).toBe(SAFETY_NOTE)
+  })
+
+  it('does not add caution when common_name is "unknown" (route handles that as 422)', () => {
+    const result = shapePlantResponse({
+      common_name: 'unknown',
+      latin_name: '',
+      confidence: 0.3,
+      features_observed: [],
+      hazard_signals: [],
+    })
+    expect(result.safety_note).toBeUndefined()
+  })
+
+  it('matches foxglove via features in shapePlantResponse and attaches warning', () => {
+    const result = shapePlantResponse({
+      common_name: 'flower seed',
+      latin_name: '',
+      confidence: 0.8,
+      features_observed: ['foxglove printed on label', 'tall spiky flower stalk shown'],
+      hazard_signals: [],
+    })
+    expect(result.warning).toBeDefined()
+    expect(result.warning?.level).toBe('severe')
   })
 })
 

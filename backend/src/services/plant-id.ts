@@ -28,19 +28,65 @@ interface DangerEntry {
 
 const DB = dangerousPlants as DangerEntry[]
 
+// Escape a string for use in a RegExp literal.
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// Returns true when `word` appears as a whole word inside `text`.
+function containsWholeWord(text: string, word: string): boolean {
+  return new RegExp(`\\b${escapeRe(word)}\\b`).test(text)
+}
+
 export function matchDangerousPlant(
   commonName: string,
   latinName: string,
+  extraText?: string,  // e.g. features_observed joined — searched last, after name matches
 ): DangerEntry | null {
   const nc = commonName.toLowerCase().trim()
   const nl = latinName.toLowerCase().trim()
-  // Exact matches first — prevents "white baneberry" from hitting "baneberry" via partial
+  const nx = extraText?.toLowerCase() ?? ''
+
+  // 1. Exact matches first — prevents "white baneberry" from hitting "baneberry" via partial
   const exact = DB.find(
     (p) => (nc && p.common_name === nc) || (nl && p.latin_name && p.latin_name === nl),
   )
   if (exact) return exact
-  // Partial common-name match: "american baneberry" → "baneberry"
-  if (nc) return DB.find((p) => nc.includes(p.common_name)) ?? null
+
+  // 2. DB entry's common_name as a whole word in identified common_name
+  //    "american baneberry" → "baneberry"; "wild foxglove" → "foxglove"
+  if (nc) {
+    const inCommon = DB.find((p) => containsWholeWord(nc, p.common_name))
+    if (inCommon) return inCommon
+  }
+
+  // 3. DB entry's common_name as a whole word anywhere in the identified latin_name
+  //    Handles edge cases where model puts the common name in the latin field
+  if (nl) {
+    const inLatin = DB.find((p) => containsWholeWord(nl, p.common_name))
+    if (inLatin) return inLatin
+  }
+
+  // 4. DB entry's common_name as a whole word in extra context (features_observed)
+  //    "foxglove printed on packet" → "foxglove" → dangerous match
+  if (nx) {
+    const inExtra = DB.find((p) => containsWholeWord(nx, p.common_name))
+    if (inExtra) return inExtra
+  }
+
+  // 5. Latin genus match: first word of DB entry's latin vs first word of identified latin
+  //    "digitalis spp." → genus "digitalis" = genus of "digitalis purpurea" → foxglove
+  if (nl) {
+    const identGenus = nl.split(' ')[0]
+    if (identGenus) {
+      const byGenus = DB.find((p) => {
+        const dbGenus = p.latin_name?.split(' ')[0]
+        return dbGenus === identGenus
+      })
+      if (byGenus) return byGenus
+    }
+  }
+
   return null
 }
 
@@ -97,18 +143,23 @@ export function shouldAddSafetyNote(hazardSignals: string[]): boolean {
 export const SAFETY_NOTE =
   'Never eat wild berries or mushrooms based on an app identification.'
 
+export const UNVERIFIED_CAUTION =
+  'Unverified plant — do not eat or handle unknown plants.'
+
 // ── Specialist vision call ────────────────────────────────────────────────────
 
-const PLANT_SPECIALIST_PROMPT = `Identify this plant's species. Return ONLY this JSON object, no other text:
+const PLANT_SPECIALIST_PROMPT = `Identify this plant's species. If the image shows a seed packet, plant label, bulb package, or any plant-commerce product, identify the PLANT SPECIES it contains or depicts — not the packaging itself.
+
+Return ONLY this JSON object, no other text:
 {"common_name":"","latin_name":"","confidence":0.0,"features_observed":[],"hazard_signals":[]}
 
-- common_name: specific common English name (e.g. "Baneberry", "Swiss chard"), or "unknown" if you cannot identify the species with confidence >= 0.6
-- latin_name: scientific binomial name, or "" if unknown
-- confidence: 0.0–1.0 float for species identification certainty
-- features_observed: up to 5 visible botanical features (e.g. "red berry clusters", "opposite serrated leaves")
-- hazard_signals: visible signs of potential toxicity risk (e.g. "red berries", "milky sap", "umbrella flower clusters"); empty array if none observed
+- common_name: the specific plant species common name (e.g. "Foxglove", "Baneberry", "Oleander"). NEVER use packaging or commerce labels such as "flower seed", "seeds", "bulb", "annual", "perennial", or "plant" as the common_name. If a seed packet shows "Foxglove" or "Digitalis", the common_name is "Foxglove". Set to "unknown" only when you genuinely cannot determine the species.
+- latin_name: scientific binomial (e.g. "Digitalis purpurea"), or "" if unknown
+- confidence: 0.0–1.0 species identification certainty
+- features_observed: up to 5 visible botanical features OR plant names visible on any label or packaging (e.g. "foxglove printed on packet", "bell-shaped purple flowers shown", "red berry clusters")
+- hazard_signals: visible toxicity indicators (e.g. "red berries", "milky sap", "umbrella flower clusters"); empty array if none
 
-NEVER guess a commercially popular plant for a wild plant just because it is common — accuracy over helpfulness.
+NEVER substitute a commercially popular plant for a different wild plant — accuracy over helpfulness.
 If confidence < 0.6, set common_name to "unknown".
 JSON object only. No markdown, no prose.`
 
@@ -219,7 +270,13 @@ export interface PlantResponse {
 export function shapePlantResponse(
   specialist: PlantSpecialistResult,
 ): PlantResponse {
-  const danger = matchDangerousPlant(specialist.common_name, specialist.latin_name)
+  // Pass features_observed as extra context so commerce-label edge cases
+  // (e.g. common_name:"flower seed", features:["foxglove printed on packet"]) still match.
+  const danger = matchDangerousPlant(
+    specialist.common_name,
+    specialist.latin_name,
+    specialist.features_observed.join(' '),
+  )
   const addNote = shouldAddSafetyNote(specialist.hazard_signals)
   const base: PlantResponse = {
     common_name: specialist.common_name,
@@ -232,7 +289,12 @@ export function shapePlantResponse(
     base.warning = { level: danger.level, note: danger.note }
   }
   if (addNote) {
+    // Berry/mushroom note takes precedence over the generic unverified caution
     base.safety_note = SAFETY_NOTE
+  } else if (!danger && specialist.confidence < 0.5 && specialist.common_name.toLowerCase() !== 'unknown') {
+    // Low-confidence plant that didn't match any dangerous species — soft caution so it
+    // never appears unconditionally safe to the user
+    base.safety_note = UNVERIFIED_CAUTION
   }
   return base
 }
