@@ -6,6 +6,7 @@ struct AlertsView: View {
     @Query(sort: \PriceAlert.createdDate, order: .reverse) private var alerts: [PriceAlert]
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("priceAlerts") private var priceAlertsEnabled = true
     @State private var isChecking = false
 
     var body: some View {
@@ -38,9 +39,9 @@ struct AlertsView: View {
                 }
             }
         }
-        .task { await checkAllAlerts() }
+        .task { if priceAlertsEnabled { await checkAllAlerts() } }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active { Task { await checkAllAlerts() } }
+            if newPhase == .active, priceAlertsEnabled { Task { await checkAllAlerts() } }
         }
     }
 

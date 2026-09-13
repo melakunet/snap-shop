@@ -5,7 +5,7 @@ import PhotosUI
 import UIKit
 import UniformTypeIdentifiers
 
-enum ScanMode {
+enum ScanMode: String {
     case precision
     case deep
 }
@@ -15,7 +15,7 @@ struct CameraView: View {
     @EnvironmentObject private var proStatus: ProStatus
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showPaywall = false
-    @State private var scanMode: ScanMode = .precision
+    @AppStorage("defaultScanMode") private var scanMode: ScanMode = .precision
     @State private var isScanning = false
     @State private var flashOn = false
     @State private var deepPulse = false
@@ -42,6 +42,7 @@ struct CameraView: View {
     @State private var showVideoFrameCrop = false
     @State private var deepScanEscalationHint: String? = nil
     @State private var shouldNavigateAfterTranscript = false
+    @AppStorage("haptics") private var hapticsEnabled = true
     #if DEBUG
     @State private var isDebugScanning = false
     @State private var debugTask: Task<Void, Never>?
@@ -284,7 +285,9 @@ struct CameraView: View {
             withAnimation(.spring(duration: 0.2)) { isScanning = recording }
         }
         .onChange(of: showResults) { _, isShowing in
-            if !isShowing {
+            if isShowing {
+                if hapticsEnabled { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+            } else {
                 session.capturedImageData = nil
                 session.capturedVideoURL = nil
                 submittedQuery = ""
@@ -312,8 +315,12 @@ struct CameraView: View {
 
     private var topBar: some View {
         HStack {
-            circleButton("xmark") {}
-                .accessibilityHidden(true)
+            circleButton("xmark") {
+                searchQuery = ""
+                searchFocused = false
+                session.clearDetectedBarcode()
+            }
+            .accessibilityLabel("Clear search")
             Spacer()
             Image("AppLogo")
                 .resizable()
@@ -614,6 +621,7 @@ struct CameraView: View {
                             return
                         }
                         if !proStatus.isPro { QuotaManager.recordScan() }
+                        if hapticsEnabled { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
                         session.capturePhoto(flashOn: flashOn)
                     } else {
                         guard proStatus.isPro else {
@@ -623,6 +631,7 @@ struct CameraView: View {
                         if session.isRecording {
                             session.stopRecording()
                         } else {
+                            if hapticsEnabled { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
                             session.startRecording()
                         }
                     }

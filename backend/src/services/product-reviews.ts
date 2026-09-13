@@ -101,9 +101,10 @@ export async function fetchProductReviews(
     const product = data.product_results ?? {}
     const reviewsData = data.reviews_results ?? {}
 
-    // If SerpAPI returned no useful data for this product ID, return null in live mode.
+    // SerpAPI has no data for this product ID — return an honest empty response so the
+    // client shows "No review data available" rather than a fabricated mock or a 404 fallback.
     if (!product.rating && !(reviewsData.reviews?.length)) {
-      return null
+      return { rating: 0, review_count: 0, top_reviews: [] }
     }
 
     // Build the rating breakdown — SerpAPI returns [{stars: 5, amount: 8210}, ...]

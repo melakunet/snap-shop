@@ -3,10 +3,10 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var authState: AuthState
     @EnvironmentObject private var proStatus: ProStatus
-    @State private var defaultMode: ScanMode = .precision
-    @State private var iCloudSync = true
-    @State private var priceAlerts = true
-    @State private var haptics = true
+    @AppStorage("defaultScanMode") private var defaultMode: ScanMode = .precision
+    @AppStorage("iCloudSync") private var iCloudSync = false
+    @AppStorage("priceAlerts") private var priceAlerts = true
+    @AppStorage("haptics") private var haptics = true
     @AppStorage(RetailerPrefs.userDefaultsKey) private var retailerSelectionCSV = ""
     @State private var showSignOutConfirm = false
     #if DEBUG
@@ -152,10 +152,16 @@ struct SettingsView: View {
 
     private var privacySection: some View {
         Section {
-            Toggle("iCloud Sync", isOn: $iCloudSync)
-                .font(Typography.body)
-                .foregroundStyle(Color.Brand.textPrimary)
-                .tint(Color.Brand.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("iCloud Sync", isOn: $iCloudSync)
+                    .font(Typography.body)
+                    .foregroundStyle(Color.Brand.textPrimary)
+                    .tint(Color.Brand.accent)
+                    .disabled(true)
+                Text("Coming soon")
+                    .font(Typography.caption)
+                    .foregroundStyle(Color.Brand.textSecondary)
+            }
             NavigationLink {
                 Text("Privacy Policy")
                     .font(Typography.body)

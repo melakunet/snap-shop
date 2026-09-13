@@ -22,8 +22,14 @@ route.get('/', async (c) => {
   try {
     const cached = await cacheGet<ProductReviews>(cacheKey, c.env)
     if (cached !== null) {
-      console.log(JSON.stringify({ cache: 'hit', key: cacheKey }))
-      return c.json(cached)
+      // Bypass stale mock data: if the cached entry was generated in key-absent dev mode but
+      // SERPAPI_KEY is now present, re-fetch live rather than serving fabricated reviews.
+      if (cached.mock && c.env.SERPAPI_KEY) {
+        console.log(JSON.stringify({ cache: 'mock-bypass', key: cacheKey }))
+      } else {
+        console.log(JSON.stringify({ cache: 'hit', key: cacheKey }))
+        return c.json(cached)
+      }
     }
     console.log(JSON.stringify({ cache: 'miss', key: cacheKey }))
   } catch (err) {

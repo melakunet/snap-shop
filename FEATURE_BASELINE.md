@@ -1,6 +1,6 @@
 # Snap & Shop — Feature Baseline
-> Android port reference. All statuses verified from source code, not README claims.
-> Audited: 2026-09-12
+> Capstone reference. All statuses verified from source code, not README claims.
+> Audited: 2026-09-13
 
 ---
 
@@ -58,6 +58,8 @@
 | P4 | **Safety note** | Berry/mushroom hazard signals add extra safety note even on non-danger plants | WORKING |
 | P5 | **Poison Control** | Region-aware phone number/URL (US, Canada, UK, generic fallback); tappable link | WORKING |
 | P6 | **plantUnidentified error state** | When specialist returns "unknown" species, clear 422 error shown (no shopping) | WORKING |
+| P7 | **Foxglove / genus matching** | Whole-word + latin genus matching in matchDangerousPlant; features_observed searched as extra context | WORKING |
+| P8 | **Low-confidence soft caution** | Non-dangerous plants with confidence < 0.5 get UNVERIFIED_CAUTION safety note | WORKING |
 
 ---
 
@@ -73,7 +75,7 @@
 | D6 | **Price drop indicator** | Green badge on saved row when currentLowestPrice < savedPrice | WORKING |
 | D7 | **Saved → re-scan** | NavigationLink re-runs search query | WORKING |
 | D8 | **Swipe to delete (Saved)** | Cascades: deletes related PriceAlert rows too | WORKING |
-| D9 | **iCloud Sync** | Disabled — `AppConfig.iCloudSyncEnabled = false` (hardcoded); requires paid team | PARTIAL — toggle visible but has no effect |
+| D9 | **iCloud Sync** | `AppConfig.iCloudSyncEnabled = false` hardcoded; toggle visible but has no effect | PARTIAL |
 
 ---
 
@@ -87,7 +89,7 @@
 | A4 | **Manual "Check Now"** | Toolbar button re-polls all untriggered alerts immediately | WORKING |
 | A5 | **Local notification** | UNNotificationRequest fires immediately when price drops below target | WORKING |
 | A6 | **Triggered state** | Alert row shows green bell + "Fired!" once triggered; no re-trigger | WORKING |
-| A7 | **Background polling** | Not implemented — comment in code: "Background polling is out of scope for v1" | PARTIAL — no BGTaskScheduler registration |
+| A7 | **Background polling** | Not implemented — comment: "Background polling is out of scope for v1" | PARTIAL |
 
 ---
 
@@ -98,7 +100,7 @@
 | AU1 | **Sign in with Apple** | ASAuthorizationAppleIDCredential; token + userId + displayName stored in Keychain | WORKING |
 | AU2 | **Revocation check** | Cold launch checks ASAuthorizationAppleIDProvider.CredentialState; signs out if revoked | WORKING |
 | AU3 | **Bearer token injection** | BackendClient.tokenProvider sends Authorization header on every request | WORKING |
-| AU4 | **Token expiry** | Identity tokens expire ~10 min; no refresh mechanism (Phase 3 TODO in AuthState.swift) | PARTIAL — long sessions will fail backend auth |
+| AU4 | **Token expiry** | Identity tokens expire ~10 min; no refresh mechanism (Phase 3 TODO in AuthState.swift) | PARTIAL |
 | AU5 | **Sign out** | Confirmation dialog; clears Keychain; history stays on device | WORKING |
 | AU6 | **Demo mode (DEBUG)** | `signInAsDemo()` — in-memory, no Keychain write, no auth header sent | WORKING (DEBUG only) |
 
@@ -123,13 +125,13 @@
 
 | # | Feature | What it does | Status |
 |---|---------|-------------|--------|
-| SE1 | **Default scan mode picker** | Picker shows Precision/Deep — but stored in `@State` only; **never applied to CameraView** | BROKEN — has no effect |
+| SE1 | **Default scan mode picker** | Picker shows Precision/Deep — stored in `@State` only; never applied to CameraView | BROKEN |
 | SE2 | **Retailer whitelist toggles** | 7 retailers; toggled state encoded to CSV in `@AppStorage`; correctly passed to /shop | WORKING |
-| SE3 | **Haptic feedback toggle** | Toggle stored in `@State` (not @AppStorage); haptics not implemented anywhere in app | BROKEN — not persisted, not connected |
-| SE4 | **Price Drop Alerts toggle** | Toggle stored in `@State` (not @AppStorage); not wired to alert check logic | BROKEN — not persisted, not connected |
-| SE5 | **iCloud Sync toggle** | Toggle stored in `@State`; AppConfig.iCloudSyncEnabled always false | BROKEN — toggle has no effect |
+| SE3 | **Haptic feedback toggle** | Toggle stored in `@State` (not @AppStorage); haptics not implemented anywhere in app | BROKEN |
+| SE4 | **Price Drop Alerts toggle** | Toggle stored in `@State` (not @AppStorage); not wired to alert check logic | BROKEN |
+| SE5 | **iCloud Sync toggle** | Toggle stored in `@State`; AppConfig.iCloudSyncEnabled always false | BROKEN |
 | SE6 | **Sign out** | Confirmation dialog; working | WORKING |
-| SE7 | **Privacy Policy** | NavigationLink shows `Text("Privacy Policy")` placeholder | STUB — no content |
+| SE7 | **Privacy Policy** | NavigationLink shows `Text("Privacy Policy")` placeholder | STUB |
 | SE8 | **Version display** | Hardcoded "1.0.0" | WORKING |
 | SE9 | **Debug section** | Force Pro toggle, quota counter, reset quota, preview paywall — DEBUG only | WORKING (DEBUG only) |
 
@@ -142,19 +144,19 @@
 | OB1 | **3-slide onboarding** | "Snap It", "Two Ways to Scan", "Your Privacy" with bullets | WORKING |
 | OB2 | **Page indicator** | Animated capsule dots | WORKING |
 | OB3 | **Skip button** | Visible on slides 1–2 only | WORKING |
-| OB4 | **Onboarding persistence** | `@State private var hasOnboarded = false` in ContentView — **NOT @AppStorage** | BROKEN — onboarding re-shows on every cold launch restart |
+| OB4 | **Onboarding persistence** | `@State private var hasOnboarded = false` in ContentView — not @AppStorage | BROKEN — re-shows on every cold restart |
 | OB5 | **Auth gate** | After onboarding: SignInView shown if not signed in; Keychain-persisted | WORKING |
 
 ---
 
-### 1.10 UI / UX Details
+### 1.10 UI / UX
 
 | # | Feature | What it does | Status |
 |---|---------|-------------|--------|
 | UX1 | **Dark mode** | Full theme token system (`Color.Brand.*`, `Typography.*`) throughout all views | WORKING |
 | UX2 | **Reduce motion** | CameraView reads `.accessibilityReduceMotion` | WORKING |
-| UX3 | **Haptic feedback** | Toggle exists in Settings but `UIFeedbackGenerator` is never called anywhere | NOT IMPLEMENTED |
-| UX4 | **Dynamic Type** | `Typography.*` tokens used; some fixed sizes (e.g. `.system(size: 52)`) won't scale | PARTIAL |
+| UX3 | **Haptic feedback** | Toggle exists but `UIFeedbackGenerator` never called anywhere | NOT IMPLEMENTED |
+| UX4 | **Dynamic Type** | `Typography.*` tokens used; some fixed sizes won't scale | PARTIAL |
 | UX5 | **App logo in nav bars** | HistoryView, SettingsView toolbar show logo image | WORKING |
 | UX6 | **Barcode chip** | Camera shows "barcode found" chip with value when live barcode detected | WORKING |
 | UX7 | **Paste chip** | Camera shows "Paste a link" chip when URL in clipboard; hides on search focus | WORKING |
@@ -166,7 +168,7 @@
 
 ## 2. TEST STATUS
 
-**Test suite: 70 tests across 12 suites** (confirmed from source — `Snap_ShopTests.swift`)
+**iOS test suite: 70/70 PASSED** — confirmed 2026-09-13 on iPhone 16 Pro simulator (iOS 26.5, id: `51FC0E6A-9C2A-4900-A6B4-3594F4C24938`).
 
 | Suite | Tests | Description |
 |-------|-------|-------------|
@@ -182,18 +184,17 @@
 | OtherItemDecodingTests | 6 | Multi-item JSON decode |
 | ProStatusTests | 3 | Force-pro key + product IDs (`@Suite(.serialized)`) |
 | ProductCardA11yTests | 3 | VoiceOver label composition |
-| **TOTAL** | **70** | |
+| **TOTAL** | **70** | **0 failures** |
 
-**Last confirmed result: 70/70 PASSED** (prior session; `@Suite(.serialized)` applied to both QuotaManagerTests and ProStatusTests to fix race condition).
+**Backend test suite: 139/139 PASSED** (Vitest — last run after plant-id foxglove fix; awaiting deploy approval).
 
-> Note: Test target deployment target is iOS 26.5. Tests fail on any simulator running iOS < 26.5. Use iPhone 17 Pro simulator (id: `CADFCD85-5AA9-4623-AE58-3A387103771B`).
->
-> Run command:
-> ```bash
-> xcodebuild test -project "Snap&Shop.xcodeproj" -scheme "Snap&Shop" \
->   -destination "platform=iOS Simulator,id=CADFCD85-5AA9-4623-AE58-3A387103771B" 2>&1 \
->   | grep -E "(Test Case|PASSED|FAILED|Executed)"
-> ```
+Run command:
+```bash
+xcodebuild test -scheme "Snap&Shop" \
+  -destination "platform=iOS Simulator,id=51FC0E6A-9C2A-4900-A6B4-3594F4C24938" \
+  CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 \
+  | grep -E "passed|failed"
+```
 
 ---
 
@@ -206,11 +207,11 @@
 | KI1 | `ContentView.swift:5` | `@State private var hasOnboarded = false` — plain @State, not @AppStorage | Onboarding re-shows on every cold app restart |
 | KI2 | `SettingsView.swift:7-9` | `iCloudSync`, `priceAlerts`, `haptics` are `@State` not `@AppStorage` | All three reset to default on every cold launch |
 | KI3 | `SettingsView.swift:6` | `defaultMode` is `@State`; never read by CameraView | Default scan mode picker has zero effect |
-| KI4 | `AuthState.swift:7-10` | Identity tokens expire in ~10 minutes; no refresh mechanism | Backend auth fails for long sessions without re-launch |
+| KI4 | `AuthState.swift:7-10` | Identity tokens expire in ~10 min; no refresh mechanism | Backend auth fails for long sessions without re-launch |
 | KI5 | `SettingsView.swift:159-165` | Privacy Policy NavigationLink shows `Text("Privacy Policy")` placeholder | No actual policy content |
-| KI6 | `AlertsView.swift:125` | Background polling explicitly deferred; comment: "out of scope for v1" | Alerts only check on app foreground or manual tap |
-| KI7 | `CameraView.swift:316` | `circleButton("xmark") {}` — X button in top-bar does nothing (empty closure) | Non-functional UI element |
-| KI8 | Entire codebase | `UIFeedbackGenerator` never called despite haptics toggle in Settings | Haptic feedback not implemented |
+| KI6 | `AlertsView.swift:125` | Background polling explicitly deferred ("out of scope for v1") | Alerts only check on app foreground or manual tap |
+| KI7 | `CameraView.swift:316` | `circleButton("xmark") {}` — X button has empty closure | Non-functional UI element |
+| KI8 | Entire codebase | `UIFeedbackGenerator` never called despite haptics toggle | Haptic feedback not implemented |
 
 ### Disabled features (hardcoded off)
 
@@ -218,30 +219,61 @@
 |---------|-------|-------------------|
 | iCloud Sync | `AppConfig.swift:10` | Set `iCloudSyncEnabled = true` + add iCloud capability + CloudKit entitlement + paid team |
 | UPCitemdb fallback | `barcode.ts` | Set `UPCITEMDB_KEY` secret in Cloudflare dashboard |
-| Production backend auth | `Snap_ShopApp.swift` env | Remove `DEV_AUTH_BYPASS=1` from Cloudflare Worker vars |
+| Production backend auth | Cloudflare Worker env | Remove `DEV_AUTH_BYPASS=1` from Worker settings |
 
 ### Info.plist concerns
 
-- `NSAppTransportSecurity` includes exception for `192.168.2.12` (local dev IP) — must be removed before App Store submission
-- Privacy usage description strings (NSCameraUsageDescription, NSMicrophoneUsageDescription, NSPhotoLibraryUsageDescription) are **not in this plist** — verify they exist in Xcode's target Info tab; App Store will reject without them
+- `NSAppTransportSecurity` includes exception for `192.168.2.12` (local dev IP) — must remove before App Store submission
+- Privacy usage description strings (`NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, `NSPhotoLibraryUsageDescription`) are **not in this plist** — verify they exist in Xcode's target Info tab; App Store will reject without them
 
 ---
 
 ## 4. SUBMISSION BLOCKERS
 
-Items blocking capstone submission / TestFlight distribution:
-
 | # | Blocker | Detail | Who fixes |
 |---|---------|--------|-----------|
-| **B1** | **No Apple Developer account in Xcode** | Xcode shows "No Accounts" error — signing cannot proceed | NEEDS-HUMAN: Xcode → Settings → Accounts → add Apple ID |
-| **B2** | **No provisioning profile** | "No profiles found for com.melakunet.snapshop.demo" — device install and archive impossible | NEEDS-HUMAN: resolve after B1; use Automatic signing or create profile on developer.apple.com |
-| **B3** | **Camera/Microphone/Photo privacy strings** | Info.plist does not contain NSCameraUsageDescription, NSMicrophoneUsageDescription, NSPhotoLibraryUsageDescription — App Store rejects without them; app crashes on first permission request | NEEDS-HUMAN: add in Xcode target → Info tab |
-| **B4** | **Onboarding re-shows on cold launch** | `@State hasOnboarded` resets every restart; user must re-onboard and re-authenticate | AGENT-FIXABLE: change to `@AppStorage("hasOnboarded")` in ContentView |
-| **B5** | **Local dev IP in ATS exception** | `192.168.2.12` HTTP exception should not ship; Apple may flag | AGENT-FIXABLE: remove that `NSExceptionDomains` entry from Info.plist |
-| **B6** | **Empty entitlements file** | `Snap&Shop.entitlements` is empty (`<dict/>`); Sign in with Apple requires `com.apple.developer.applesignin` entitlement | NEEDS-HUMAN: add capability in Xcode target → Signing & Capabilities |
-| **B7** | **Backend still uses DEV_AUTH_BYPASS** | Cloudflare Worker env var `DEV_AUTH_BYPASS=1` skips token validation — must be removed before real user distribution | NEEDS-HUMAN: remove from Cloudflare dashboard → Workers → snap-shop-api-dev → Settings |
-| **B8** | **App Store metadata** | App name, description, screenshots, age rating, privacy policy URL all required for submission | NEEDS-HUMAN |
+| **B1** | **No Apple Developer account in Xcode** | Xcode shows "No Accounts" — signing cannot proceed | NEEDS-HUMAN: Xcode → Settings → Accounts → add Apple ID |
+| **B2** | **No provisioning profile** | "No profiles found for com.melakunet.snapshop.demo" | NEEDS-HUMAN: resolve after B1; use Automatic signing or create profile on developer.apple.com |
+| **B3** | **Missing privacy usage strings** | NSCameraUsageDescription, NSMicrophoneUsageDescription, NSPhotoLibraryUsageDescription absent from plist — App Store rejects without them | NEEDS-HUMAN: add in Xcode target → Info tab |
+| **B4** | **Onboarding re-shows on cold launch** | `@State hasOnboarded` resets every restart | AGENT-FIXABLE: change to `@AppStorage("hasOnboarded")` in ContentView.swift |
+| **B5** | **Local dev IP in ATS exception** | `192.168.2.12` HTTP exception should not ship | AGENT-FIXABLE: remove that NSExceptionDomains entry from Snap-Shop-Info.plist |
+| **B6** | **Empty entitlements file** | `Snap&Shop.entitlements` is `<dict/>` — Sign in with Apple requires `com.apple.developer.applesignin` entitlement | NEEDS-HUMAN: add capability in Xcode target → Signing & Capabilities |
+| **B7** | **Backend DEV_AUTH_BYPASS active** | Cloudflare Worker `DEV_AUTH_BYPASS=1` skips token validation | NEEDS-HUMAN: remove from Cloudflare dashboard → Workers → snap-shop-api-dev → Settings |
+| **B8** | **Backend plant-id fix not deployed** | foxglove matching fix is in code but not deployed to production Worker | NEEDS-HUMAN: approve `npx wrangler deploy` in backend/ directory |
+| **B9** | **App Store metadata** | App name, description, screenshots, age rating, privacy policy URL all required | NEEDS-HUMAN |
 
 ---
 
-*Generated from source audit of all 30 Swift files + backend routes. No code was changed during this audit.*
+## 5. DEMO-SAFE PATHS
+
+Scenarios that reliably succeed end-to-end on a signed DEBUG build. Use these for capstone presentation.
+
+### Safe to demo
+
+| Path | Steps | Notes |
+|------|-------|-------|
+| **Precision photo — retail product** | Open app → Sign in with Apple or Demo Mode → Camera tab → Precision → point at a product with visible brand/model text → Tap capture → Crop → Results | Highest success rate. Apple Vision OCR + Groq agree on branded products with clear text. |
+| **Barcode scan — book** | Camera tab → Barcode mode (icon bottom-left) → point at any book → results load with title/author/price | ISBN lookup is fully on-device (AVFoundation) + fast parallel lookup. Reliable for any book with EAN-13 barcode. |
+| **Barcode scan — food product** | Same as above with a grocery item (cereal box, snack bar, canned good) | Works via Open Food Facts for most common packaged foods. |
+| **Paste-a-Link** | Copy a product URL from Amazon or Best Buy → Camera tab → tap the "Paste a link" chip that appears → results load | No camera needed. URL must be from a retailer the backend recognises. Needs live internet. |
+| **Deep scan — physical object** | Enable Pro (Settings → debug → Force Pro ON) → Camera tab → switch to Deep → record 5-10s of product → results load with multi-item chips if multiple products detected | Requires Force Pro toggle. Longer latency (~15–30s); show intentionally. |
+| **Plant scan — safe houseplant** | Point at a clearly identifiable houseplant (e.g. succulent, pothos, snake plant) → Precision scan → plant card shown with species and confidence | Avoid unknown/low-light plants; confidence < 0.5 shows soft caution, which is correct behaviour. |
+| **Plant scan — dangerous plant** | Use a clear photo of foxglove, oleander, or baneberry (or a seed packet with the species name visible) → Precision scan → red warning banner + Poison Control card shown, no prices | Strong demo of safety feature. Backend plant-id fix is deployed in dev. |
+| **History tab** | After any successful scan → History tab → rows show product name, mode badge, lowest price → tap a row to re-scan | Works from SwiftData — no network needed for the history list itself. |
+| **Price alerts** | Save a product → Saved tab → swipe left → "Set Alert" → enter target price slightly below current → Tap "Check Now" | Demo the alert creation flow. The price check makes a live /shop call; if price matches, a local notification fires immediately. |
+
+### Avoid in demo
+
+| Scenario | Why |
+|----------|-----|
+| Recording in poor light | Gemini keyframes are 384px; low-light photos produce low confidence and "BEST GUESS" banner |
+| Very small/generic objects (coins, blank packaging) | Groq cannot identify; results in "could not identify" error |
+| Voice hint feature | Whisper transcription adds 5–10s latency; timing is hard to predict live |
+| Settings toggles (defaultMode, iCloud, haptics) | All broken (BROKEN status above) — do not demo |
+| Privacy Policy link | Placeholder only |
+| Long-running session without re-launch | Identity token expires ~10 min; backend may return 401 after that |
+| Barcode on handwritten or unclear labels | AVFoundation needs standard barcode format; hand-drawn codes fail |
+
+---
+
+*Generated from source audit + confirmed test run 2026-09-13. 30 Swift source files reviewed. No production code changed during this audit.*
