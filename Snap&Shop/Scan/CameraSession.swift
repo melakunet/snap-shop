@@ -67,7 +67,13 @@ final class CameraSession: NSObject, ObservableObject {
             session.addOutput(metadataOutput)
             // Must be set AFTER adding to session so availableMetadataObjectTypes is populated
             let supported = metadataOutput.availableMetadataObjectTypes
-            let wanted: [AVMetadataObject.ObjectType] = [.ean13, .ean8, .upce, .code128, .qr]
+            let wanted: [AVMetadataObject.ObjectType] = [
+                .ean13, .ean8, .upce,          // retail + ISBN (EAN-13 covers ISBN-13)
+                .code128, .code39,             // general purpose barcodes
+                .interleaved2of5,              // carton / logistics codes
+                .dataMatrix,                   // small product labels
+                .qr,                           // QR codes
+            ]
             metadataOutput.metadataObjectTypes = wanted.filter { supported.contains($0) }
             metadataOutput.setMetadataObjectsDelegate(self, queue: .main)
         }

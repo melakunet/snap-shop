@@ -129,9 +129,9 @@ export async function identifyWithGemini(
 
   const result = await callAndParse({ ...base, model: FLASH })
 
-  // Escalate to Pro when top-item confidence is low
+  // Escalate to Pro only on very low confidence — 0.4 threshold keeps most scans on Flash
   const maxConf = result.length === 0 ? 0 : Math.max(...result.map((r) => r.confidence))
-  if (maxConf < 0.6) {
+  if (maxConf < 0.4) {
     return callAndParse({ ...base, model: PRO })
   }
 

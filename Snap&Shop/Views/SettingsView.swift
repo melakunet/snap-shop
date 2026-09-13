@@ -238,14 +238,14 @@ struct SettingsView: View {
     #if DEBUG
     private var debugSection: some View {
         Section {
-            HStack {
+            Toggle(isOn: $debugForcePro) {
                 Text("Force Pro")
                     .font(Typography.body)
                     .foregroundStyle(Color.Brand.textPrimary)
-                Spacer()
-                Text(debugForcePro ? "ON" : "OFF")
-                    .font(Typography.body.weight(.semibold))
-                    .foregroundStyle(debugForcePro ? Color.Brand.success : Color.Brand.textSecondary)
+            }
+            .tint(Color.Brand.accent)
+            .onChange(of: debugForcePro) { _, _ in
+                Task { await proStatus.refresh() }
             }
             HStack {
                 Text("Precision Scans Used")

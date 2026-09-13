@@ -52,11 +52,11 @@ enum BackendClient {
     /// Builds a URLRequest pre-loaded with the HTTP method and, when signed in,
     /// the Authorization: Bearer header. All public methods use this instead of
     /// constructing URLRequest directly.
-    private static func makeRequest(url: URL, method: String = "GET") -> URLRequest {
+    private static func makeRequest(url: URL, method: String = "GET", timeout: TimeInterval = 90) -> URLRequest {
         #if DEBUG
         print("[BackendClient] → \(method) \(url.absoluteString)")
         #endif
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
         if let token = tokenProvider?() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -104,7 +104,8 @@ enum BackendClient {
     }
 
     /// Full precision scan: identify image and run OCR in parallel, enrich query, then fetch prices.
-    /// Returns (product, []) when plant detection suppresses shopping (dangerous plant or no query).
+    /// Returns (product, []) when plant detection suppresses shopping or prices fail —
+    /// a price failure never discards an already-identified product.
     static func scan(imageData: Data, barcode: String? = nil, whitelist: [String] = []) async throws -> (IdentifyResult, [ShopItem]) {
         async let productResult = identifyPrecision(imageData: imageData, barcode: barcode)
         async let ocrText = ImageCropper.recognizeText(in: imageData)
@@ -120,7 +121,7 @@ enum BackendClient {
             print("[OCR] enriched query: \"\(query)\"")
         }
         #endif
-        let prices = try await shop(query: query, retailerWhitelist: whitelist)
+        let prices = (try? await shop(query: query, retailerWhitelist: whitelist)) ?? []
         return (product, prices)
     }
 
@@ -141,7 +142,8 @@ enum BackendClient {
     static func identifyDeep(frames: [Data], hint: String? = nil) async throws -> IdentifyResult {
         let url = AppConfig.backendBaseURL.appending(path: "/identify/deep")
         let boundary = UUID().uuidString
-        var request = makeRequest(url: url, method: "POST")
+        // 8 frames through Gemini (with possible Pro escalation) can take up to 2 minutes.
+        var request = makeRequest(url: url, method: "POST", timeout: 180)
         request.setValue(
             "multipart/form-data; boundary=\(boundary)",
             forHTTPHeaderField: "Content-Type"
@@ -154,18 +156,19 @@ enum BackendClient {
     }
 
     /// Full deep scan: extract keyframes, identify, fetch prices.
-    /// Returns (product, []) when plant detection suppresses shopping.
+    /// Returns (product, []) when plant detection suppresses shopping or prices fail —
+    /// a price timeout never discards an already-identified product.
     static func scanDeep(videoURL: URL, hint: String? = nil, whitelist: [String] = []) async throws -> (IdentifyResult, [ShopItem]) {
         let frames = try await extractKeyframes(from: videoURL, count: 8)
         let product = try await identifyDeep(frames: frames, hint: hint)
         let q = product.searchQuery.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return (product, []) }
-        let prices = try await shop(query: q, retailerWhitelist: whitelist)
+        let prices = (try? await shop(query: q, retailerWhitelist: whitelist)) ?? []
         return (product, prices)
     }
 
     /// Extract up to `count` evenly-spaced JPEG keyframes from a video file.
-    static func extractKeyframes(from url: URL, count: Int = 8) async throws -> [Data] {
+    static func extractKeyframes(from url: URL, count: Int = 5) async throws -> [Data] {
         let asset = AVURLAsset(url: url)
         let duration = try await asset.load(.duration)
         let durationSeconds = CMTimeGetSeconds(duration)
@@ -173,8 +176,10 @@ enum BackendClient {
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 512, height: 512)
-        generator.requestedTimeToleranceBefore = .zero
+        generator.maximumSize = CGSize(width: 384, height: 384)
+        // Allow 0.5s tolerance so AVFoundation uses the nearest GOP keyframe instead of
+        // decoding every B-frame to hit an exact time — ~40% faster extraction on H.264/HEVC.
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
         generator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
 
         let step = durationSeconds / Double(count)
@@ -189,7 +194,7 @@ enum BackendClient {
 
             generator.generateCGImagesAsynchronously(forTimes: requestTimes) { _, image, _, result, _ in
                 if result == .succeeded, let cgImage = image,
-                   let jpeg = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.7) {
+                   let jpeg = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.5) {
                     let capped = ImageCropper.cap(jpeg: jpeg)
                     #if DEBUG
                     if capped.count != jpeg.count {
@@ -230,7 +235,7 @@ enum BackendClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try checkHTTP(response, data)
         let product = try decode(IdentifyResult.self, from: data)
-        let prices = try await shop(query: product.searchQuery, retailerWhitelist: whitelist)
+        let prices = (try? await shop(query: product.searchQuery, retailerWhitelist: whitelist)) ?? []
         return (product, prices)
     }
 
@@ -363,18 +368,24 @@ enum BackendClient {
     private static func checkHTTP(_ response: URLResponse, _ data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
-            if http.statusCode == 422 {
-                struct ErrEnvelope: Decodable {
-                    struct Inner: Decodable { let code: String?; let message: String }
-                    let error: Inner
-                }
-                if let env = try? JSONDecoder().decode(ErrEnvelope.self, from: data) {
-                    if env.error.code == "plant_unidentified" {
-                        throw BackendError.plantUnidentified(env.error.message)
-                    }
+            struct ErrEnvelope: Decodable {
+                struct Inner: Decodable { let code: String?; let message: String }
+                let error: Inner
+            }
+            // Always try to decode the structured error envelope first so the user
+            // sees the clean "message" field rather than raw JSON regardless of status code.
+            if let env = try? JSONDecoder().decode(ErrEnvelope.self, from: data) {
+                switch env.error.code {
+                case "plant_unidentified":
+                    throw BackendError.plantUnidentified(env.error.message)
+                case "no_products_found", "barcode_not_found":
                     throw BackendError.noProductsFound(env.error.message)
+                default:
+                    // rate_limited (429), upstream_error (502), internal (500), invalid_input (400)
+                    throw BackendError.httpError(http.statusCode, env.error.message)
                 }
             }
+            // Fallback for non-JSON or malformed responses.
             let preview = String(data: data, encoding: .utf8).map { String($0.prefix(300)) } ?? ""
             throw BackendError.httpError(http.statusCode, preview)
         }

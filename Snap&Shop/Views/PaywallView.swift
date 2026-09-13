@@ -270,6 +270,19 @@ struct PaywallView: View {
                 .font(Typography.caption)
                 .foregroundStyle(Color.Brand.textSecondary)
                 .multilineTextAlignment(.center)
+
+            #if DEBUG
+            Button("Enable Pro for Testing") {
+                UserDefaults.standard.set(true, forKey: "debug_force_pro")
+                Task {
+                    await proStatus.refresh()
+                    dismiss()
+                }
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Color.Brand.textSecondary.opacity(0.5))
+            .padding(.top, Spacing.sm)
+            #endif
         }
     }
 
