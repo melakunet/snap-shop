@@ -4,3 +4,4 @@ node_modules/
 dist/
 samples/
 .dev.vars
+.dev.vars.save

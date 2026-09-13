@@ -71,6 +71,12 @@ describe('ShopItem schema with rating fields', () => {
     }
   })
 
+  it('accepts mock field', () => {
+    const result = ShopItem.safeParse({ ...base, mock: true })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.mock).toBe(true)
+  })
+
   it('rejects a non-integer review_count', () => {
     const result = ShopItem.safeParse({ ...base, review_count: 1.5 })
     expect(result.success).toBe(false)

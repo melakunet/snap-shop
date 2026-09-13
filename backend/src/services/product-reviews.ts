@@ -27,6 +27,7 @@ function mockReviews(): ProductReviews {
         date: 'January 2025',
       },
     ],
+    mock: true,
   }
 }
 
@@ -59,35 +60,50 @@ interface SerpProductResponse {
   error?: string
 }
 
-export async function fetchProductReviews(productId: string, env: Env): Promise<ProductReviews> {
+export async function fetchProductReviews(
+  productId: string,
+  env: Env,
+  region: 'ca' | 'us' = 'ca'
+): Promise<ProductReviews | null> {
   if (!env.SERPAPI_KEY) return mockReviews()
 
   try {
+    const regionParams = region === 'ca' ? {
+      gl: 'ca',
+      hl: 'en',
+      location: 'Toronto, Ontario, Canada'
+    } : {
+      gl: 'us',
+      hl: 'en',
+      location: 'Austin, Texas, United States'
+    }
+
     const params = new URLSearchParams({
       engine: 'google_product',
       product_id: productId,
       api_key: env.SERPAPI_KEY,
+      ...regionParams
     })
 
     const res = await fetch(`${SERPAPI_URL}?${params}`)
     if (!res.ok) {
       const body = await res.text()
-      console.error(`[product-reviews] SerpAPI ${res.status}: ${body.slice(0, 300)} — falling back to mock`)
-      return mockReviews()
+      console.error(`[product-reviews] SerpAPI ${res.status}: ${body.slice(0, 300)}`)
+      return null // Live mode: return null on error
     }
 
     const data = await res.json() as SerpProductResponse
     if (data.error) {
-      console.error(`[product-reviews] SerpAPI error: ${data.error} — falling back to mock`)
-      return mockReviews()
+      console.error(`[product-reviews] SerpAPI error: ${data.error}`)
+      return null // Live mode: return null on error
     }
 
     const product = data.product_results ?? {}
     const reviewsData = data.reviews_results ?? {}
 
-    // If SerpAPI returned no useful data for this product ID, fall back to mock.
+    // If SerpAPI returned no useful data for this product ID, return null in live mode.
     if (!product.rating && !(reviewsData.reviews?.length)) {
-      return mockReviews()
+      return null
     }
 
     // Build the rating breakdown — SerpAPI returns [{stars: 5, amount: 8210}, ...]
@@ -121,7 +137,7 @@ export async function fetchProductReviews(productId: string, env: Env): Promise<
       top_reviews: topReviews,
     }
   } catch (err) {
-    console.error('[product-reviews] unexpected error — falling back to mock:', err)
-    return mockReviews()
+    console.error('[product-reviews] unexpected error:', err)
+    return null // Live mode: return null on error
   }
 }

@@ -47,6 +47,18 @@ describe('ShopRequest schema', () => {
   it('parses a valid request', () => {
     const result = ShopRequest.safeParse({ query: 'Nike Air Force 1', retailer_whitelist: [] })
     expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.region).toBe('ca') // check default
+    }
+  })
+
+  it('accepts valid region values', () => {
+    expect(ShopRequest.safeParse({ query: 'q', retailer_whitelist: [], region: 'us' }).success).toBe(true)
+    expect(ShopRequest.safeParse({ query: 'q', retailer_whitelist: [], region: 'ca' }).success).toBe(true)
+  })
+
+  it('rejects invalid region values', () => {
+    expect(ShopRequest.safeParse({ query: 'q', retailer_whitelist: [], region: 'uk' }).success).toBe(false)
   })
 
   it('fails when query is missing', () => {

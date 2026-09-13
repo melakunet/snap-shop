@@ -35,6 +35,21 @@ function applyWhitelist(items: ShopItem[], whitelist: string[]): ShopItem[] {
   return items.filter((item) => normalized.some((w) => item.source.toLowerCase().includes(w)))
 }
 
+function isGrocery(query: string, category?: string): boolean {
+  const keywords = ['milk', 'bread', 'grocery', 'snack', 'beverage', 'produce', 'food', 'cereal', 'snack', 'candy', 'coffee', 'tea']
+  const lowQuery = query.toLowerCase()
+  const lowCategory = category?.toLowerCase() ?? ''
+  return keywords.some(kw => lowQuery.includes(kw) || lowCategory.includes(kw))
+}
+
+function filterGroceryResults(items: ShopItem[]): ShopItem[] {
+  const electronicsRetailers = ['best buy', 'newegg', 'b&h', 'b \u0026 h']
+  return items.filter(item => {
+    const lowSource = item.source.toLowerCase()
+    return !electronicsRetailers.some(e => lowSource.includes(e))
+  })
+}
+
 // POST /shop — Best Buy + eBay in parallel, SerpAPI as fallback/supplement, 1-hour cache
 route.post('/', async (c) => {
   let body: unknown
@@ -50,12 +65,12 @@ route.post('/', async (c) => {
     return c.json(errorBody('invalid_input', msg), 400)
   }
 
-  const { query, retailer_whitelist, sort } = parsed.data
+  const { query, retailer_whitelist, sort, region, category } = parsed.data
 
   // Cache check — before any API calls
   let cacheKey = ''
   try {
-    cacheKey = await buildShopCacheKey(query, retailer_whitelist, sort)
+    cacheKey = await buildShopCacheKey(`${query}:${region}:${category ?? ''}`, retailer_whitelist, sort)
     const cached = await cacheGet<ShopItem[]>(cacheKey, c.env)
     if (cached !== null) {
       console.log(JSON.stringify({ cache: 'hit', key: cacheKey }))
@@ -72,7 +87,7 @@ route.post('/', async (c) => {
   }
 
   try {
-    // Step 1 — Run Best Buy + eBay in parallel (free tier, gracefully return [] when keys absent)
+    // Step 1 — Run Best Buy + eBay in parallel
     const [bestBuyResults, ebayResults] = await Promise.all([
       fetchBestBuyPrices(query, c.env),
       fetchEbayPrices(query, c.env),
@@ -90,12 +105,18 @@ route.post('/', async (c) => {
         ))
 
     if (needsSerpApi) {
-      const serpResults = await fetchShoppingResults(query, retailer_whitelist, c.env)
+      const serpResults = await fetchShoppingResults(query, retailer_whitelist, c.env, region)
       merged.push(...serpResults)
     }
 
-    // Step 3 — Whitelist, deduplicate by URL, sort, take top 10
-    const whitelisted = applyWhitelist(merged, retailer_whitelist)
+    // Step 3 — Apply grocery heuristic if applicable
+    let finalResults = merged
+    if (isGrocery(query, category)) {
+      finalResults = filterGroceryResults(merged)
+    }
+
+    // Step 4 — Whitelist, deduplicate by URL, sort, take top 10
+    const whitelisted = applyWhitelist(finalResults, retailer_whitelist)
     const deduped = deduplicateByUrl(whitelisted)
 
     let results: ShopItem[]

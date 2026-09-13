@@ -47,6 +47,8 @@ export const ShopRequest = z.object({
   query: z.string().min(1, 'query must not be empty'),
   retailer_whitelist: z.array(z.string()),
   sort: z.enum(['price', 'reviews']).optional().default('price'),
+  region: z.enum(['ca', 'us']).optional().default('ca'),
+  category: z.string().optional(),
 })
 export type ShopRequest = z.infer<typeof ShopRequest>
 
@@ -62,6 +64,7 @@ export const ShopItem = z.object({
   title: z.string().optional(),
   snippet: z.string().optional(),
   product_id: z.string().optional(),
+  mock: z.boolean().optional(),
 })
 export type ShopItem = z.infer<typeof ShopItem>
 
@@ -107,5 +110,6 @@ export const ProductReviews = z.object({
   review_count: z.number().int(),
   breakdown: RatingBreakdown.optional(),
   top_reviews: z.array(ReviewItem),
+  mock: z.boolean().optional(),
 })
 export type ProductReviews = z.infer<typeof ProductReviews>

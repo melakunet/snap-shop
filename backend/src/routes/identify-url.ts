@@ -35,7 +35,7 @@ route.post('/', async (c) => {
       model: result.productName,
       category: 'product',
       distinguishing_features: [],
-      confidence: 0.9,
+      confidence: result.confidence,
       search_query: result.searchQuery,
       image_url: result.imageURL,
     })

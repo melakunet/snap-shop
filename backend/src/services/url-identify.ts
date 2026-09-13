@@ -5,6 +5,44 @@ export interface URLIdentifyResult {
   productName: string
   imageURL: string
   searchQuery: string
+  confidence: number
+}
+
+/**
+ * Derive a search query from the URL itself when fetching or parsing fails.
+ * e.g. ".../myrrh-tonka-room-spray?size=100ml" → "myrrh tonka room spray"
+ */
+export function deriveSlugFromUrl(urlStr: string): string | null {
+  try {
+    const url = new URL(urlStr)
+    // Get last meaningful path segment, strip trailing slash
+    const path = url.pathname.replace(/\/$/, '')
+    const segment = path.split('/').pop()
+    if (!segment) return null
+
+    // Strip extension and query string (URL object already handled query)
+    const slug = segment.split('.')[0]
+
+    // Split on hyphens and underscores
+    const tokens = slug.split(/[-_]/)
+
+    // Drop pure-number tokens and common size/unit tokens
+    const productTokens = tokens.filter((t) => {
+      const low = t.toLowerCase()
+      // Pure numbers (usually internal IDs)
+      if (/^\d+$/.test(low)) return false
+      // Size tokens like 100ml, 50g, 10oz
+      if (/^\d+(ml|g|oz|kg|lb)$/i.test(low)) return false
+      // Common clothing sizes
+      if (['xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl'].includes(low)) return false
+      return low.length > 0
+    })
+
+    if (productTokens.length === 0) return null
+    return productTokens.join(' ').toLowerCase().trim()
+  } catch {
+    return null
+  }
 }
 
 // Extract schema.org Product name from JSON-LD script blocks
@@ -82,32 +120,67 @@ export async function identifyFromURL(pageURL: string, env: Env): Promise<URLIde
   const cached = await cacheGet<URLIdentifyResult>(cacheKey, env)
   if (cached) return cached
 
-  let html: string
+  let html = ''
+  let fetchOk = false
+
   try {
+    const origin = new URL(pageURL).origin
     const res = await fetch(pageURL, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; SnapShopBot/1.0)',
-        Accept: 'text/html,application/xhtml+xml',
-        'Accept-Language': 'en-US,en;q=0.9',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-CA,en-US;q=0.9,en;q=0.8',
+        'Referer': origin,
       },
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(10_000),
     })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    html = await res.text()
+
+    if (res.ok) {
+      html = await res.text()
+      fetchOk = true
+    } else {
+      console.warn(`[identify-url] Fetch failed with status ${res.status} for ${pageURL}`)
+    }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    throw new Error(`Could not fetch the page: ${msg}`)
+    console.error(`[identify-url] Fetch error for ${pageURL}:`, err)
   }
 
-  const productName = extractJsonLd(html) ?? extractOgTitle(html) ?? extractTitle(html)
-  if (!productName) throw new Error('No product name found on the page')
+  // Attempt metadata extraction if fetch succeeded
+  let productName: string | null = null
+  let imageURL = ''
 
-  const imageURL = extractOgImage(html) ?? ''
+  if (fetchOk) {
+    productName = extractJsonLd(html) ?? extractOgTitle(html) ?? extractTitle(html)
+    imageURL = extractOgImage(html) ?? ''
+  }
+
+  // Layer 2 Fallback — if fetch failed or returned no product name
+  if (!productName) {
+    const fallbackQuery = deriveSlugFromUrl(pageURL)
+    if (!fallbackQuery) {
+      throw new Error(fetchOk ? 'No product name found on the page' : 'Could not fetch the page')
+    }
+    const result: URLIdentifyResult = {
+      productName: fallbackQuery,
+      imageURL: '',
+      searchQuery: fallbackQuery,
+      confidence: 0.5
+    }
+    await cacheSet(cacheKey, result, 86_400, env).catch(() => {})
+    return result
+  }
+
+  // Success path
   const asin = extractAsin(pageURL)
   const baseQuery = cleanForSearch(productName)
   const searchQuery = asin ? `${baseQuery} ${asin}`.trim() : baseQuery
 
-  const result: URLIdentifyResult = { productName, imageURL, searchQuery }
+  const result: URLIdentifyResult = {
+    productName,
+    imageURL,
+    searchQuery,
+    confidence: 0.9
+  }
   await cacheSet(cacheKey, result, 86_400, env).catch(() => { /* fail open */ })
   return result
 }
