@@ -11,12 +11,14 @@ const REVIEWS_TTL = 6 * 3600 // 6 hours — product reviews change slowly
 
 route.get('/', async (c) => {
   const productId = c.req.query('product_id')?.trim()
+  const region = (c.req.query('region')?.toLowerCase() as 'ca' | 'us' | undefined) ?? 'ca'
+
   if (!productId) {
     return c.json(errorBody('invalid_input', 'Missing required query param: product_id'), 400)
   }
 
   // Cache check
-  const cacheKey = `reviews:${productId}`
+  const cacheKey = `reviews:${productId}:${region}`
   try {
     const cached = await cacheGet<ProductReviews>(cacheKey, c.env)
     if (cached !== null) {
@@ -33,7 +35,13 @@ route.get('/', async (c) => {
   }
 
   try {
-    const reviews = await fetchProductReviews(productId, c.env)
+    const reviews = await fetchProductReviews(productId, c.env, region)
+
+    if (!reviews) {
+      // In live mode without mock fallback, we might get null.
+      // Clients should handle 404 by hiding the reviews card.
+      return c.json(errorBody('not_found', 'Product reviews not found'), 404)
+    }
 
     cacheSet(cacheKey, reviews, REVIEWS_TTL, c.env).catch((err: unknown) => {
       void captureError(c.env.SENTRY_DSN, {

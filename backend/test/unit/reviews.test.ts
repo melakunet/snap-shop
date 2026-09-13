@@ -61,6 +61,12 @@ describe('ProductReviews schema', () => {
     expect(result.success).toBe(true)
   })
 
+  it('accepts mock field', () => {
+    const result = ProductReviews.safeParse({ ...validReviews, mock: true })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.mock).toBe(true)
+  })
+
   it('parses without optional breakdown', () => {
     const { breakdown: _bd, ...withoutBreakdown } = validReviews
     const result = ProductReviews.safeParse(withoutBreakdown)
