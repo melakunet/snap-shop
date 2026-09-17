@@ -8,6 +8,23 @@ import { fetchEbayPrices } from '../services/ebay'
 import { buildShopCacheKey, cacheGet, cacheSet } from '../services/cache'
 import { captureError } from '../lib/sentry'
 
+// Race an upstream call against a timeout; on timeout or error return the fallback,
+// so one stalled price source can never freeze the whole /shop response.
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T, label: string): Promise<T> {
+  return Promise.race([
+    p.catch((err) => {
+      console.error(`[shop] ${label} failed: ${err instanceof Error ? err.message : String(err)}`)
+      return fallback
+    }),
+    new Promise<T>((resolve) =>
+      setTimeout(() => {
+        console.warn(`[shop] ${label} timed out after ${ms}ms — skipping`)
+        resolve(fallback)
+      }, ms),
+    ),
+  ])
+}
+
 const route = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 // Bayesian weighted rating: prevents items with few reviews from dominating.
@@ -88,9 +105,11 @@ route.post('/', async (c) => {
 
   try {
     // Step 1 — Run Best Buy + eBay in parallel
+    // Start SerpAPI in parallel with Best Buy/eBay; awaited later only if needed.
+    const serpPromise = withTimeout(fetchShoppingResults(query, retailer_whitelist, c.env, region), 50000, [] as ShopItem[], 'serpapi')
     const [bestBuyResults, ebayResults] = await Promise.all([
-      fetchBestBuyPrices(query, c.env),
-      fetchEbayPrices(query, c.env),
+      withTimeout(fetchBestBuyPrices(query, c.env), 4000, [] as ShopItem[], 'bestbuy'),
+      withTimeout(fetchEbayPrices(query, c.env), 4000, [] as ShopItem[], 'ebay'),
     ])
 
     const merged: ShopItem[] = [...bestBuyResults, ...ebayResults]
@@ -105,7 +124,7 @@ route.post('/', async (c) => {
         ))
 
     if (needsSerpApi) {
-      const serpResults = await fetchShoppingResults(query, retailer_whitelist, c.env, region)
+      const serpResults = await serpPromise
       merged.push(...serpResults)
     }
 
@@ -136,8 +155,8 @@ route.post('/', async (c) => {
     }
 
     // Store in cache (fire-and-forget on failure)
-    if (cacheKey) {
-      cacheSet(cacheKey, results, 3600, c.env).catch((err: unknown) => {
+    if (cacheKey && results.length > 0) {
+      cacheSet(cacheKey, results, 86400, c.env).catch((err: unknown) => {
         void captureError(c.env.SENTRY_DSN, {
           error: err instanceof Error ? err : new Error(String(err)),
           route: 'POST /shop cache-set',

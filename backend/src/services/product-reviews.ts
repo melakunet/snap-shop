@@ -65,6 +65,7 @@ export async function fetchProductReviews(
   env: Env,
   region: 'ca' | 'us' = 'ca'
 ): Promise<ProductReviews | null> {
+  // Mock data ONLY in key-absent dev mode
   if (!env.SERPAPI_KEY) return mockReviews()
 
   try {
@@ -101,10 +102,9 @@ export async function fetchProductReviews(
     const product = data.product_results ?? {}
     const reviewsData = data.reviews_results ?? {}
 
-    // SerpAPI has no data for this product ID — return an honest empty response so the
-    // client shows "No review data available" rather than a fabricated mock or a 404 fallback.
+    // If SerpAPI returned no useful data for this product ID, return null in live mode.
     if (!product.rating && !(reviewsData.reviews?.length)) {
-      return { rating: 0, review_count: 0, top_reviews: [] }
+      return null
     }
 
     // Build the rating breakdown — SerpAPI returns [{stars: 5, amount: 8210}, ...]

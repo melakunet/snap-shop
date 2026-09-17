@@ -3,8 +3,8 @@ import { DeepIdentifyResult } from '../lib/schema'
 import type { DeepIdentifyItem } from '../lib/schema'
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
-export const FLASH = 'gemini-2.5-flash'
-export const PRO = 'gemini-2.5-pro'
+export const FLASH = 'gemini-3.6-flash'
+export const PRO = 'gemini-3.8-flash'
 
 const SYSTEM_PROMPT =
   'You are a product identification API. Output ONLY a valid JSON array. No markdown, no prose, no code fences.'

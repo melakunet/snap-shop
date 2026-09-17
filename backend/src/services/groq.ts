@@ -2,9 +2,9 @@ import type { Env } from '../lib/schema'
 import { IdentifyResult } from '../lib/schema'
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
-const GROQ_MODEL = 'qwen/qwen3.6-27b'
+const GROQ_MODEL = 'qwen/qwen3.8-27b'
 
-// Groq free tier: 8 000 tokens/min for qwen/qwen3.6-27b. Under sustained load
+// Groq free tier: 8 000 tokens/min for <the-real-model-from-the-list>. Under sustained load
 // the TPM cap is hit quickly — retries handle brief windows; a paid tier removes the cap.
 const GROQ_RETRIES = 2
 
