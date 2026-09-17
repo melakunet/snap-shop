@@ -89,18 +89,34 @@ enum BackendClient {
         return try decode(IdentifyResult.self, from: data)
     }
 
-    /// POST JSON {"query": ..., "retailer_whitelist": [], "sort": "price"|"reviews"} to /shop.
-    static func shop(query: String, retailerWhitelist: [String] = [], sort: String = "price") async throws -> [ShopItem] {
+    /// POST JSON {"query": ..., "retailer_whitelist": [], "sort": "price"|"reviews", "region": "us"|"ca"} to /shop.
+    /// Returns the decoded item list and the price-fetch timestamp (from X-Prices-Fetched-At when present).
+    static func shop(
+        query: String,
+        retailerWhitelist: [String] = [],
+        sort: String = "price"
+    ) async throws -> (items: [ShopItem], fetchedAt: Date) {
         let url = AppConfig.backendBaseURL.appending(path: "/shop")
-        var request = makeRequest(url: url, method: "POST")
+        var request = makeRequest(url: url, method: "POST", timeout: 60)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let regionCode = Locale.current.region?.identifier.lowercased() ?? "us"
+        let region = (regionCode == "ca") ? "ca" : "us"
         request.httpBody = try JSONEncoder().encode(
-            ShopRequestBody(query: query, retailer_whitelist: retailerWhitelist, sort: sort)
+            ShopRequestBody(query: query, retailer_whitelist: retailerWhitelist, sort: sort, region: region)
         )
 
         let (data, response) = try await URLSession.shared.data(for: request)
         try checkHTTP(response, data)
-        return try decode([ShopItem].self, from: data)
+        let items = try decode([ShopItem].self, from: data)
+        let fetchedAt: Date
+        if let http = response as? HTTPURLResponse,
+           let headerVal = http.value(forHTTPHeaderField: "X-Prices-Fetched-At"),
+           let epochMs = Double(headerVal) {
+            fetchedAt = Date(timeIntervalSince1970: epochMs / 1000)
+        } else {
+            fetchedAt = Date()
+        }
+        return (items, fetchedAt)
     }
 
     /// Full precision scan: identify image and run OCR in parallel, enrich query, then fetch prices.
@@ -121,11 +137,11 @@ enum BackendClient {
             print("[OCR] enriched query: \"\(query)\"")
         }
         #endif
-        let prices = (try? await shop(query: query, retailerWhitelist: whitelist)) ?? []
+        let prices = (try? await shop(query: query, retailerWhitelist: whitelist))?.items ?? []
         return (product, prices)
     }
 
-    private static func enrichedQuery(base: String, ocr: String) -> String {
+    static func enrichedQuery(base: String, ocr: String) -> String {
         guard !ocr.isEmpty else { return base }
         let baseLower = base.lowercased()
         let extra = ocr.split(separator: " ")
@@ -163,7 +179,7 @@ enum BackendClient {
         let product = try await identifyDeep(frames: frames, hint: hint)
         let q = product.searchQuery.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return (product, []) }
-        let prices = (try? await shop(query: q, retailerWhitelist: whitelist)) ?? []
+        let prices = (try? await shop(query: q, retailerWhitelist: whitelist))?.items ?? []
         return (product, prices)
     }
 
@@ -235,7 +251,7 @@ enum BackendClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try checkHTTP(response, data)
         let product = try decode(IdentifyResult.self, from: data)
-        let prices = (try? await shop(query: product.searchQuery, retailerWhitelist: whitelist)) ?? []
+        let prices = (try? await shop(query: product.searchQuery, retailerWhitelist: whitelist))?.items ?? []
         return (product, prices)
     }
 
@@ -406,6 +422,7 @@ private struct ShopRequestBody: Encodable {
     let query: String
     let retailer_whitelist: [String]
     let sort: String
+    let region: String
 }
 
 private struct TranscribeResponse: Decodable {

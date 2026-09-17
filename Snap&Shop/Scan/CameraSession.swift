@@ -93,6 +93,8 @@ final class CameraSession: NSObject, ObservableObject {
             guard self.session.isRunning else { return }
             self.session.stopRunning()
         }
+        // Reset capture flag so the next session start isn't permanently locked out.
+        DispatchQueue.main.async { self.isCapturing = false }
     }
 
     // MARK: — Precision capture

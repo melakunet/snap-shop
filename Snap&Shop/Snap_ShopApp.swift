@@ -21,7 +21,7 @@ struct Snap_ShopApp: App {
 }
 
 private let appModelContainer: ModelContainer = {
-    let schema = Schema([ScanRecord.self, SavedItem.self, PriceAlert.self])
+    let schema = Schema([ScanRecord.self, SavedItem.self, PriceAlert.self, CachedPriceList.self])
     let config: ModelConfiguration
     if AppConfig.iCloudSyncEnabled {
         // Prerequisites before enabling: iCloud capability in the target, CloudKit entitlement,

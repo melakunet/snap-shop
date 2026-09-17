@@ -131,7 +131,7 @@ struct AlertsView: View {
 
         for alert in alerts {
             guard !alert.triggered else { continue }
-            guard let shopItems = try? await BackendClient.shop(query: alert.searchQuery, sort: "price"),
+            guard let shopItems = (try? await BackendClient.shop(query: alert.searchQuery, sort: "price"))?.items,
                   let lowest = shopItems.min(by: { $0.extractedPrice < $1.extractedPrice }),
                   lowest.extractedPrice > 0
             else { continue }

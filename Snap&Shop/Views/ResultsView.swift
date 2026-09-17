@@ -128,6 +128,8 @@ struct ResultsView: View {
     // P4.006 — multi-item chip navigation
     @State private var activeShopQuery: String? = nil
     @State private var chipCache: [String: [PriceResult]] = [:]
+    @State private var pricesLoading = false
+    @State private var stalePriceDate: Date? = nil
     #if DEBUG
     @State private var debugCropPreview: UIImage? = nil
     #endif
@@ -208,7 +210,9 @@ struct ResultsView: View {
             guard case .loading = phase else { return }
             do {
                 var shopItems: [ShopItem] = []
+                var shopFetchedAt: Date = Date()
                 var productResult: IdentifyResult? = nil
+                var effectiveShopQ = ""  // actual query sent to /shop (may differ from searchQuery due to OCR)
                 let sort = sortMode.rawValue
 
                 // Re-sort or chip switch: identifyResult already set — skip identify, re-fetch /shop
@@ -219,15 +223,20 @@ struct ResultsView: View {
                         phase = .loaded(cached)
                         return
                     }
-                    guard !q.isEmpty else {
-                        phase = .error("Couldn't build a search query — try a clearer photo.")
-                        return
+                    guard !q.isEmpty else { phase = .loaded([]); return }
+                    effectiveShopQ = q
+                    if let fetched = try? await BackendClient.shop(query: q, retailerWhitelist: retailerWhitelist, sort: sort) {
+                        shopItems = fetched.items
+                        shopFetchedAt = fetched.fetchedAt
                     }
-                    shopItems = try await BackendClient.shop(query: q, retailerWhitelist: retailerWhitelist, sort: sort)
                 } else if let query = textQuery {
                     let q = query.trimmingCharacters(in: .whitespaces)
-                    guard !q.isEmpty else { phase = .empty; return }
-                    shopItems = try await BackendClient.shop(query: q, sort: sort)
+                    guard !q.isEmpty else { phase = .loaded([]); return }
+                    effectiveShopQ = q
+                    if let fetched = try? await BackendClient.shop(query: q, sort: sort) {
+                        shopItems = fetched.items
+                        shopFetchedAt = fetched.fetchedAt
+                    }
                 } else if let data = imageData {
                     let toUpload: Data
                     if let preComputed = uploadData {
@@ -235,13 +244,56 @@ struct ResultsView: View {
                     } else {
                         toUpload = await ImageCropper.prepareForUpload(data: data)
                     }
-                    let (product, items) = try await BackendClient.scan(imageData: toUpload, barcode: barcode, whitelist: retailerWhitelist)
-                    productResult = product
-                    shopItems = items
+                    // Identify and OCR run in parallel; show the product card the moment
+                    // identify returns instead of waiting for the shop fetch (37+ s via SerpAPI).
+                    async let productTask = BackendClient.identifyPrecision(imageData: toUpload, barcode: barcode)
+                    async let ocrTask    = ImageCropper.recognizeText(in: data)
+                    let identified = try await productTask
+                    let ocrText    = await ocrTask
+                    // Stop here if the user switched sort or navigated away mid-identify.
+                    try Task.checkCancellation()
+                    productResult  = identified
+                    identifyResult = identified
+                    let base = identified.searchQuery.trimmingCharacters(in: .whitespaces)
+                    effectiveShopQ = base
+                    // Show cached prices immediately while shop runs, or an empty spinner
+                    if !base.isEmpty, let (cached, cacheDate) = loadCachedPrices(for: base) {
+                        stalePriceDate = cacheDate
+                        phase = .loaded(cached)
+                    } else {
+                        phase = .loaded([])   // Product card visible; price area shows spinner
+                    }
+                    pricesLoading = true
+                    if !base.isEmpty {
+                        let enrichedQ = BackendClient.enrichedQuery(base: base, ocr: ocrText)
+                        if let fetched = try? await BackendClient.shop(query: enrichedQ, retailerWhitelist: retailerWhitelist, sort: sort) {
+                            shopItems = fetched.items
+                            shopFetchedAt = fetched.fetchedAt
+                        }
+                    }
                 } else if let url = videoURL {
-                    let (product, items) = try await BackendClient.scanDeep(videoURL: url, hint: hint, whitelist: retailerWhitelist)
-                    productResult = product
-                    shopItems = items
+                    // Same decoupled pattern: show product from first keyframe pass, then stream prices.
+                    let frames     = try await BackendClient.extractKeyframes(from: url, count: 8)
+                    let identified = try await BackendClient.identifyDeep(frames: frames, hint: hint)
+                    try Task.checkCancellation()
+                    productResult  = identified
+                    identifyResult = identified
+                    let videoQ = identified.searchQuery.trimmingCharacters(in: .whitespaces)
+                    effectiveShopQ = videoQ
+                    // Show cached prices immediately while shop runs
+                    if !videoQ.isEmpty, let (cached, cacheDate) = loadCachedPrices(for: videoQ) {
+                        stalePriceDate = cacheDate
+                        phase = .loaded(cached)
+                    } else {
+                        phase = .loaded([])
+                    }
+                    pricesLoading = true
+                    if !videoQ.isEmpty {
+                        if let fetched = try? await BackendClient.shop(query: videoQ, retailerWhitelist: retailerWhitelist, sort: sort) {
+                            shopItems = fetched.items
+                            shopFetchedAt = fetched.fetchedAt
+                        }
+                    }
                 } else if let pageURL = productPageURL {
                     let (product, items) = try await BackendClient.identifyURL(url: pageURL, whitelist: retailerWhitelist)
                     productResult = product
@@ -251,15 +303,22 @@ struct ResultsView: View {
                 }
 
                 if let product = productResult {
-                    identifyResult = product
+                    identifyResult = product  // no-op for image/video branches (already set mid-task)
                 }
 
+                pricesLoading = false
                 let priceResults = mapToPriceResults(shopItems)
 
-                // Cache chip / re-sort results so switching chips doesn't re-fetch
-                let effectiveCacheQ = (activeShopQuery ?? identifyResult?.searchQuery ?? "")
-                    .trimmingCharacters(in: .whitespaces)
-                if !effectiveCacheQ.isEmpty {
+                // Resolve the canonical cache key: prefer the explicit shop query, fall back to identifyResult / textQuery
+                let effectiveCacheQ: String
+                if !effectiveShopQ.isEmpty {
+                    effectiveCacheQ = effectiveShopQ
+                } else {
+                    effectiveCacheQ = (identifyResult?.searchQuery ?? textQuery ?? "").trimmingCharacters(in: .whitespaces)
+                }
+
+                // In-memory chip cache (session-scoped, fresh results only)
+                if !effectiveCacheQ.isEmpty && !priceResults.isEmpty {
                     chipCache["\(effectiveCacheQ)|\(sort)"] = priceResults
                 }
 
@@ -278,11 +337,11 @@ struct ResultsView: View {
                     }
                 }
 
-                // Show loaded state whenever a product was identified, even with empty prices
-                // (price timeout or no results). Empty state is reserved for no product + no prices.
-                if priceResults.isEmpty && productResult == nil {
-                    phase = .empty
-                } else {
+                if !priceResults.isEmpty {
+                    // Fresh prices — persist to SwiftData, clear stale indicator, update display
+                    let cacheNorm = CachedPriceList.normalize(effectiveCacheQ)
+                    if !cacheNorm.isEmpty { saveCachedPrices(shopItems, for: cacheNorm, fetchedAt: shopFetchedAt) }
+                    stalePriceDate = nil
                     phase = .loaded(priceResults)
                     if let product = productResult {
                         if imageData != nil {
@@ -291,7 +350,26 @@ struct ResultsView: View {
                             await saveScanDeep(product: product, items: shopItems, videoURL: url)
                         }
                     }
-                    // textQuery and re-sorts: ephemeral, not saved to history
+                } else {
+                    // Empty prices — save scan record, then decide what to show
+                    if let product = productResult {
+                        if imageData != nil {
+                            saveScan(product: product, items: shopItems)
+                        } else if let url = videoURL {
+                            await saveScanDeep(product: product, items: shopItems, videoURL: url)
+                        }
+                    }
+                    // Image/video paths may already show stale cached prices (stalePriceDate set above) — leave those.
+                    // Other paths: try loading cache now; fall back to calm "Watching for prices…" state.
+                    if stalePriceDate == nil {
+                        let cacheNorm = CachedPriceList.normalize(effectiveCacheQ)
+                        if !cacheNorm.isEmpty, let (cached, cacheDate) = loadCachedPrices(for: cacheNorm) {
+                            stalePriceDate = cacheDate
+                            phase = .loaded(cached)
+                        } else {
+                            phase = .loaded([])
+                        }
+                    }
                 }
             } catch is CancellationError {
                 // User navigated away before the response arrived — no UI update needed.
@@ -299,7 +377,16 @@ struct ResultsView: View {
                 if let be = error as? BackendError, case .plantUnidentified(let msg) = be {
                     phase = .plantUnidentified(msg)
                 } else {
-                    phase = .error(error.localizedDescription)
+                    // Identify failure — fall back to cached prices if available, or calm watching state.
+                    pricesLoading = false
+                    let q = (identifyResult?.searchQuery ?? textQuery ?? "").trimmingCharacters(in: .whitespaces)
+                    let cacheNorm = CachedPriceList.normalize(q)
+                    if !cacheNorm.isEmpty, let (cached, cacheDate) = loadCachedPrices(for: cacheNorm) {
+                        stalePriceDate = cacheDate
+                        phase = .loaded(cached)
+                    } else {
+                        phase = .loaded([])
+                    }
                 }
             }
         }
@@ -393,6 +480,92 @@ struct ResultsView: View {
         return resized.jpegData(compressionQuality: 0.7)
     }
 
+    // MARK: — Price cache helpers
+
+    private func loadCachedPrices(for query: String) -> ([PriceResult], Date)? {
+        let norm = CachedPriceList.normalize(query)
+        guard !norm.isEmpty else { return nil }
+        var descriptor = FetchDescriptor<CachedPriceList>(
+            predicate: #Predicate { $0.normalizedQuery == norm }
+        )
+        descriptor.fetchLimit = 1
+        guard let record = (try? modelContext.fetch(descriptor))?.first else { return nil }
+        let shopItems = (try? JSONDecoder().decode([ShopItem].self, from: record.itemsJSON)) ?? []
+        guard !shopItems.isEmpty else { return nil }
+        return (mapToPriceResults(shopItems), record.fetchedAt)
+    }
+
+    private func saveCachedPrices(_ items: [ShopItem], for normalizedQuery: String, fetchedAt: Date) {
+        guard !items.isEmpty, !normalizedQuery.isEmpty else { return }
+        guard let data = try? JSONEncoder().encode(items) else { return }
+        var descriptor = FetchDescriptor<CachedPriceList>(
+            predicate: #Predicate { $0.normalizedQuery == normalizedQuery }
+        )
+        descriptor.fetchLimit = 1
+        if let existing = (try? modelContext.fetch(descriptor))?.first {
+            existing.itemsJSON = data
+            existing.fetchedAt = fetchedAt
+        } else {
+            modelContext.insert(CachedPriceList(normalizedQuery: normalizedQuery, itemsJSON: data, fetchedAt: fetchedAt))
+        }
+    }
+
+    private var watchingForPricesView: some View {
+        VStack(spacing: Spacing.md) {
+            Image(systemName: "magnifyingglass.circle")
+                .font(.system(size: 36))
+                .foregroundStyle(Color.Brand.textSecondary.opacity(0.5))
+            Text("Watching for prices…")
+                .font(Typography.body.weight(.medium))
+                .foregroundStyle(Color.Brand.textPrimary)
+            Text("No prices found yet for this product.")
+                .font(Typography.caption)
+                .foregroundStyle(Color.Brand.textSecondary)
+                .multilineTextAlignment(.center)
+            if let url = googleShoppingURL {
+                Link("Search on Google", destination: url)
+                    .font(Typography.caption.weight(.semibold))
+                    .foregroundStyle(Color.Brand.accent)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Spacing.xxl)
+    }
+
+    private var googleShoppingURL: URL? {
+        let q = (identifyResult?.searchQuery ?? textQuery ?? "").trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return nil }
+        var components = URLComponents(string: "https://www.google.com/search")
+        components?.queryItems = [
+            URLQueryItem(name: "tbm", value: "shop"),
+            URLQueryItem(name: "q", value: q),
+        ]
+        return components?.url
+    }
+
+    private func stalePriceChip(_ date: Date) -> some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: "clock")
+                .font(.caption2)
+            Text("Prices from \(relativeAge(of: date))")
+                .font(Typography.caption)
+        }
+        .foregroundStyle(Color.Brand.textSecondary)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, 4)
+        .background(Color.Brand.textSecondary.opacity(0.1))
+        .clipShape(Capsule())
+    }
+
+    private func relativeAge(of date: Date) -> String {
+        let seconds = Int(Date().timeIntervalSince(date))
+        if seconds < 60 { return "just now" }
+        if seconds < 3600 { return "\(seconds / 60)m ago" }
+        if seconds < 86400 { return "\(seconds / 3600)h ago" }
+        let days = seconds / 86400
+        return days == 1 ? "1 day ago" : "\(days) days ago"
+    }
+
     // MARK: — ShopItem → PriceResult
 
     private func mapToPriceResults(_ items: [ShopItem]) -> [PriceResult] {
@@ -479,12 +652,29 @@ struct ResultsView: View {
                 }
 
                 if !results.isEmpty {
+                    if let staleDate = stalePriceDate {
+                        stalePriceChip(staleDate)
+                            .padding(.horizontal, Spacing.xl)
+                    }
                     sortToggle
                         .padding(.horizontal, Spacing.xl)
                     VStack(spacing: Spacing.sm) {
                         ForEach(results) { productCard($0) }
                     }
                     .padding(.horizontal, Spacing.xl)
+                } else if pricesLoading {
+                    VStack(spacing: Spacing.sm) {
+                        ProgressView()
+                            .tint(Color.Brand.accent)
+                        Text("Finding prices…")
+                            .font(Typography.caption)
+                            .foregroundStyle(Color.Brand.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Spacing.xxl)
+                } else {
+                    watchingForPricesView
+                        .padding(.horizontal, Spacing.xl)
                 }
             }
             .padding(.top, Spacing.xl)
@@ -677,7 +867,10 @@ struct ResultsView: View {
                 let name = [result.brand, result.model]
                     .filter { !$0.isEmpty }
                     .joined(separator: " ")
-                Text(name.isEmpty ? result.category.capitalized : name)
+                let headline = name.isEmpty
+                    ? (result.category.isEmpty ? "Identified Product" : result.category.prefix(1).uppercased() + result.category.dropFirst())
+                    : name
+                Text(headline)
                     .font(Typography.headline)
                     .foregroundStyle(Color.Brand.textPrimary)
                 Text(result.category.capitalized)

@@ -2,6 +2,7 @@ import Testing
 import CoreGraphics
 import Foundation
 import ImageIO
+import SwiftData
 @testable import Snap_Shop
 
 struct ImageCropperTests {
@@ -651,5 +652,138 @@ struct ProductCardA11yTests {
         )
         #expect(!label.contains("shipping"))
         #expect(!label.contains("free"))
+    }
+}
+
+// MARK: — CachedPriceList normalize tests (C1)
+
+struct CachedPriceListNormalizeTests {
+
+    @Test func lowercasesInput() {
+        #expect(CachedPriceList.normalize("Sony WH-1000XM5") == "sony wh-1000xm5")
+    }
+
+    @Test func trimsLeadingAndTrailingWhitespace() {
+        #expect(CachedPriceList.normalize("  apple airpods  ") == "apple airpods")
+    }
+
+    @Test func collapsesInternalWhitespace() {
+        #expect(CachedPriceList.normalize("nike  air   max") == "nike air max")
+    }
+
+    @Test func handlesAllTransformsTogether() {
+        #expect(CachedPriceList.normalize("  Nike  Air  Max  ") == "nike air max")
+    }
+
+    @Test func emptyStringStaysEmpty() {
+        #expect(CachedPriceList.normalize("") == "")
+    }
+
+    @Test func whitespaceOnlyBecomesEmpty() {
+        #expect(CachedPriceList.normalize("   ") == "")
+    }
+
+    @Test func alreadyNormalizedIsIdempotent() {
+        let s = "sony wh-1000xm5"
+        #expect(CachedPriceList.normalize(s) == s)
+    }
+
+    @Test func differentCasingAndSpacingProduceSameCacheKey() {
+        // Invariant the stale-price lookup depends on: two representations of the same
+        // product name must map to the same cache key.
+        let a = CachedPriceList.normalize("Nike Air Max ")
+        let b = CachedPriceList.normalize("nike  air  max")
+        #expect(a == b)
+    }
+}
+
+// MARK: — CachedPriceList SwiftData tests (C1)
+
+@Suite(.serialized)
+struct CachedPriceListSwiftDataTests {
+
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([CachedPriceList.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        return ModelContext(container)
+    }
+
+    private func sampleItem(price: String = "$99.99") -> ShopItem {
+        ShopItem(
+            price: price,
+            extractedPrice: 99.99,
+            delivery: "Free shipping",
+            source: "Amazon",
+            link: "https://amazon.com",
+            thumbnail: "",
+            rating: 4.5,
+            reviewCount: 100,
+            title: "Test Product",
+            snippet: nil,
+            productId: nil
+        )
+    }
+
+    @Test func insertAndFetchRoundTrip() throws {
+        let ctx = try makeContext()
+        let original = [sampleItem()]
+        let data = try JSONEncoder().encode(original)
+        let norm = CachedPriceList.normalize("Test Product")
+        ctx.insert(CachedPriceList(normalizedQuery: norm, itemsJSON: data, fetchedAt: Date()))
+
+        var descriptor = FetchDescriptor<CachedPriceList>(
+            predicate: #Predicate { $0.normalizedQuery == norm }
+        )
+        descriptor.fetchLimit = 1
+        let fetched = try ctx.fetch(descriptor)
+        #expect(fetched.count == 1)
+        let decoded = try JSONDecoder().decode([ShopItem].self, from: fetched[0].itemsJSON)
+        #expect(decoded.count == 1)
+        #expect(decoded[0].price == "$99.99")
+        #expect(decoded[0].source == "Amazon")
+    }
+
+    @Test func updatePreservesOneRecord() throws {
+        let ctx = try makeContext()
+        let norm = "sony wh-1000xm5"
+
+        // Insert initial record
+        let data1 = try JSONEncoder().encode([sampleItem(price: "$279.99")])
+        ctx.insert(CachedPriceList(normalizedQuery: norm, itemsJSON: data1, fetchedAt: Date()))
+
+        // Simulate saveCachedPrices: fetch existing and update in place
+        var descriptor = FetchDescriptor<CachedPriceList>(
+            predicate: #Predicate { $0.normalizedQuery == norm }
+        )
+        descriptor.fetchLimit = 1
+        let data2 = try JSONEncoder().encode([sampleItem(price: "$259.99")])
+        if let existing = try ctx.fetch(descriptor).first {
+            existing.itemsJSON = data2
+        } else {
+            ctx.insert(CachedPriceList(normalizedQuery: norm, itemsJSON: data2, fetchedAt: Date()))
+        }
+
+        // Confirm exactly one record with the updated price
+        let all = try ctx.fetch(FetchDescriptor<CachedPriceList>())
+        #expect(all.count == 1)
+        let decoded = try JSONDecoder().decode([ShopItem].self, from: all[0].itemsJSON)
+        #expect(decoded[0].price == "$259.99")
+    }
+
+    @Test func fetchedAtIsPreservedThroughRoundTrip() throws {
+        let ctx = try makeContext()
+        let data = try JSONEncoder().encode([sampleItem()])
+        let norm = "test product"
+        // Use a fixed date far enough in the past to be distinct from Date()
+        let sentinel = Date(timeIntervalSince1970: 1_000_000)
+        ctx.insert(CachedPriceList(normalizedQuery: norm, itemsJSON: data, fetchedAt: sentinel))
+
+        var descriptor = FetchDescriptor<CachedPriceList>(
+            predicate: #Predicate { $0.normalizedQuery == norm }
+        )
+        descriptor.fetchLimit = 1
+        let record = try ctx.fetch(descriptor).first
+        #expect(record?.fetchedAt == sentinel)
     }
 }
