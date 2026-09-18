@@ -74,6 +74,9 @@ async function redisIncr(
 }
 
 export const rateLimit: MiddlewareHandler<{ Bindings: Env; Variables: Variables }> = async (c, next) => {
+  // Developer bypass: skip quota check entirely
+  if (c.env.DEV_AUTH_BYPASS) return next()
+
   const family = routeFamily(c.req.path)
 
   // Unrecognised path: no quota consumed
