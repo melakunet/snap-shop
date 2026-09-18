@@ -67,7 +67,9 @@ function resolveLink(raw: string, source: string, query: string): string {
       ? match[1](encodeURIComponent(query))
       : `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(query)}`
   }
-  return raw
+  // SerpAPI returns product links with literal spaces in the query string; iOS URL(string:)
+  // rejects those outright, so percent-encode them before handing the link to a client.
+  return raw.replace(/ /g, '%20')
 }
 
 interface SerpAPIResponse {
