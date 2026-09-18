@@ -151,6 +151,7 @@ route.post('/', async (c) => {
     }
 
     // Non-plant: return Groq result unchanged
+    console.log(JSON.stringify({ route: 'identify/precision', search_query: groqResult.search_query, confidence: groqResult.confidence }))
     return c.json(groqResult)
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err))

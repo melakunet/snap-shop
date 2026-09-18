@@ -154,6 +154,20 @@ route.post('/', async (c) => {
         .slice(0, 10)
     }
 
+    // One structured line per lookup so `wrangler tail` shows what the clients actually sent
+    console.log(JSON.stringify({
+      route: 'shop',
+      query,
+      region,
+      sort,
+      whitelist: retailer_whitelist,
+      bestbuy: bestBuyResults.length,
+      ebay: ebayResults.length,
+      merged: merged.length,
+      returned: results.length,
+      ms: Date.now() - (c.get('startMs') ?? Date.now()),
+    }))
+
     // Store in cache (fire-and-forget on failure)
     if (cacheKey && results.length > 0) {
       cacheSet(cacheKey, results, 86400, c.env).catch((err: unknown) => {
