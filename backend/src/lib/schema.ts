@@ -16,6 +16,7 @@ export const Env = z.object({
   GROQ_API_KEY: z.string().optional(),
   BESTBUY_API_KEY: z.string().optional(),
   EBAY_APP_ID: z.string().optional(),
+  SERPER_API_KEY: z.string().optional(),
 })
 export type Env = z.infer<typeof Env>
 
@@ -45,7 +46,7 @@ export type DeepIdentifyResult = z.infer<typeof DeepIdentifyResult>
 // /shop — request and response
 export const ShopRequest = z.object({
   query: z.string().min(1, 'query must not be empty'),
-  retailer_whitelist: z.array(z.string()),
+  retailer_whitelist: z.array(z.string()).optional().default([]),
   sort: z.enum(['price', 'reviews']).optional().default('price'),
   region: z.enum(['ca', 'us']).optional().default('ca'),
   category: z.string().optional(),
