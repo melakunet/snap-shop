@@ -10,9 +10,12 @@ export interface URLIdentifyResult {
 
 /**
  * Derive a search query from the URL itself when fetching or parsing fails.
- * e.g. ".../myrrh-tonka-room-spray?size=100ml" → "myrrh tonka room spray"
+ * e.g. ".../myrrh-tonka-room-spray-100ml-xl-42" → "myrrh tonka room spray"
+ * Tokens from the first size/variant token onward are dropped (they describe a
+ * variant, not the product), as are long pure-number tokens (internal IDs).
+ * Short numbers are kept because they are usually part of the name ("air max 90").
  */
-export function deriveSlugFromUrl(urlStr: string): string | null {
+export function deriveQueryFromUrl(urlStr: string): string | null {
   try {
     const url = new URL(urlStr)
     // Get last meaningful path segment, strip trailing slash
@@ -26,15 +29,17 @@ export function deriveSlugFromUrl(urlStr: string): string | null {
     // Split on hyphens and underscores
     const tokens = slug.split(/[-_]/)
 
-    // Drop pure-number tokens and common size/unit tokens
-    const productTokens = tokens.filter((t) => {
+    const isSizeToken = (low: string) =>
+      /^\d+(ml|g|oz|kg|lb)$/i.test(low) || ['xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl'].includes(low)
+
+    // Everything from the first size/variant token onward is variant info, not the name
+    const sizeIdx = tokens.findIndex((t) => isSizeToken(t.toLowerCase()))
+    const nameTokens = sizeIdx === -1 ? tokens : tokens.slice(0, sizeIdx)
+
+    const productTokens = nameTokens.filter((t) => {
       const low = t.toLowerCase()
-      // Pure numbers (usually internal IDs)
-      if (/^\d+$/.test(low)) return false
-      // Size tokens like 100ml, 50g, 10oz
-      if (/^\d+(ml|g|oz|kg|lb)$/i.test(low)) return false
-      // Common clothing sizes
-      if (['xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl'].includes(low)) return false
+      // Long pure numbers are internal IDs; short ones ("90", "15") are usually model names
+      if (/^\d{3,}$/.test(low)) return false
       return low.length > 0
     })
 
@@ -44,6 +49,9 @@ export function deriveSlugFromUrl(urlStr: string): string | null {
     return null
   }
 }
+
+/** @deprecated use deriveQueryFromUrl */
+export const deriveSlugFromUrl = deriveQueryFromUrl
 
 // Extract schema.org Product name from JSON-LD script blocks
 function extractJsonLd(html: string): string | null {
@@ -156,7 +164,7 @@ export async function identifyFromURL(pageURL: string, env: Env): Promise<URLIde
 
   // Layer 2 Fallback — if fetch failed or returned no product name
   if (!productName) {
-    const fallbackQuery = deriveSlugFromUrl(pageURL)
+    const fallbackQuery = deriveQueryFromUrl(pageURL)
     if (!fallbackQuery) {
       throw new Error(fetchOk ? 'No product name found on the page' : 'Could not fetch the page')
     }

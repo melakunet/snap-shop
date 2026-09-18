@@ -42,7 +42,7 @@ async function sha256hex(input: string): Promise<string> {
     .join('')
 }
 
-// Normalized, deterministic cache key: shop:<128-bit sha256 prefix>
+// Normalized, deterministic cache key: shop:v2:<128-bit sha256 prefix> (v2 = google_shopping_light results)
 // query is lowercased+trimmed; whitelist is sorted+normalized; sort is included
 // so "Amazon.com" and "amazon.com " map to the same key.
 export async function buildShopCacheKey(query: string, whitelist: string[], sort = 'price'): Promise<string> {
@@ -52,7 +52,7 @@ export async function buildShopCacheKey(query: string, whitelist: string[], sort
     ...whitelist.map((r) => r.trim().toLowerCase()).sort(),
   ].join('\0')
   const hex = await sha256hex(canonical)
-  return `shop:${hex.slice(0, 32)}`
+  return `shop:v2:${hex.slice(0, 32)}`
 }
 
 export async function cacheGet<T>(key: string, env: Env): Promise<T | null> {

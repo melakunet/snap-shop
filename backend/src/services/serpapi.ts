@@ -84,21 +84,18 @@ export async function fetchShoppingResults(
   if (!env.SERPAPI_KEY) return mockResults(query, retailerWhitelist)
 
   try {
-    const regionParams = region === 'ca' ? {
-      gl: 'ca',
-      hl: 'en',
-      location: 'Toronto, Ontario, Canada'
-    } : {
-      gl: 'us',
-      hl: 'en',
-      location: 'Austin, Texas, United States'
-    }
+    // google_shopping_light returns in well under a second; the full google_shopping
+    // engine routinely takes 25-50s per uncached query, which is longer than the mobile
+    // clients are willing to wait. The `location` parameter is also dropped on purpose:
+    // it forces a geo-targeted live scrape and is the other major source of latency.
+    const regionParams = region === 'ca'
+      ? { gl: 'ca', hl: 'en' }
+      : { gl: 'us', hl: 'en' }
 
     const params = new URLSearchParams({
-      engine: 'google_shopping',
+      engine: 'google_shopping_light',
       q: query,
       api_key: env.SERPAPI_KEY,
-      num: '40', // fetch extra before whitelist filtering
       ...regionParams
     })
 
@@ -117,7 +114,8 @@ export async function fetchShoppingResults(
       return [] // Live mode: return empty list on error
     }
 
-    const results = data.shopping_results ?? []
+    // Drop entries with no seller or no price: they render as blank rows and sort first (price 0)
+    const results = (data.shopping_results ?? []).filter((r) => r.source && r.extracted_price)
 
     if (results.length === 0) return [] // Live mode: return empty list
 

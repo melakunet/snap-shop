@@ -106,7 +106,7 @@ route.post('/', async (c) => {
   try {
     // Step 1 — Run Best Buy + eBay in parallel
     // Start SerpAPI in parallel with Best Buy/eBay; awaited later only if needed.
-    const serpPromise = withTimeout(fetchShoppingResults(query, retailer_whitelist, c.env, region), 50000, [] as ShopItem[], 'serpapi')
+    const serpPromise = withTimeout(fetchShoppingResults(query, retailer_whitelist, c.env, region), 20000, [] as ShopItem[], 'serpapi')
     const [bestBuyResults, ebayResults] = await Promise.all([
       withTimeout(fetchBestBuyPrices(query, c.env), 4000, [] as ShopItem[], 'bestbuy'),
       withTimeout(fetchEbayPrices(query, c.env), 4000, [] as ShopItem[], 'ebay'),
